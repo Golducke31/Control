@@ -130,6 +130,30 @@ jobs:
           fi
           echo "Cobertura RLS completa."
 
+      # Los validadores estructurales no necesitan motor: son análisis de texto.
+      # Van acá porque este job es el más rápido del pipeline y porque su
+      # propósito es el mismo — detectar en un PR lo que un ojo humano no ve.
+      #
+      # `check-suite-sql` DESCUBRE las suites en vez de recibir una ruta fija.
+      # Antes apuntaba a `tests/isolation/run.mjs` y siguió reportando verde
+      # mientras las suites contable y de compras acumulaban cientos de bloques
+      # SQL sin revisar. Un validador con una lista escrita a mano deja de
+      # proteger en silencio.
+      - name: Validar el SQL embebido en las suites
+        run: node tools/check-suite-sql.mjs
+
+      - name: Validar el orden de las migraciones
+        run: node tools/check-migration-order.mjs
+
+      - name: Validar las claves foráneas compuestas
+        run: node tools/check-composite-fks.mjs
+
+      - name: Validar las tablas particionadas
+        run: node tools/check-partitioned-tables.mjs
+
+      - name: Validar la estructura del workflow
+        run: node tools/validate-workflow.mjs
+
   # ---------------------------------------------------------------------------
   # 3 · Suite de aislamiento con datos reales de dos inquilinos. Es la prueba
   #     que de verdad importa: verifica lectura, escritura y fail-closed.
@@ -280,6 +304,65 @@ jobs:
       - name: Ejecutar invariantes contables
         run: |
           node tests/accounting/run.mjs \
+            --dsn "$DATABASE_URL" \
+            --admin-dsn "$ADMIN_DATABASE_URL" \
+            --verbose
+
+  # ---------------------------------------------------------------------------
+  # 3 bis · Compras y cuentas por pagar (puerta E3 del plan ERP).
+  #
+  #     Mide la puerta, no la declara. La recepción parcial integrada con stock y
+  #     costo se verifica de punta a punta: 100 pedidas, 60 recibidas → la línea
+  #     queda `partial`; las 40 restantes cierran la orden y el costo promedio
+  #     ponderado queda exactamente en 1540 = (60×1500 + 40×1600)/100.
+  #
+  #     Necesita los DOS DSN. La preparación y la limpieza del escenario corren
+  #     como rol de plataforma porque `app.stock_movements` es append-only y
+  #     `control_app` no tiene DELETE: sin el DSN administrativo la suite sale con
+  #     código 2 en vez de disfrazarse de error de permisos.
+  # ---------------------------------------------------------------------------
+  purchasing:
+    name: Invariantes de compras
+    runs-on: ubuntu-latest
+    needs: migrations
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+      DATABASE_URL: postgres://app_login:AppL0gin!@localhost:5432/control_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Preparar esquema
+        run: |
+          set -euo pipefail
+          for f in $(ls db/migrations/*.sql | sort); do
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+
+      - name: Crear el rol de aplicación
+        run: |
+          set -euo pipefail
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE app_login LOGIN PASSWORD 'AppL0gin!' NOBYPASSRLS IN ROLE control_app;"
+
+      - name: Ejecutar invariantes de compras
+        run: |
+          node tests/purchasing/run.mjs \
             --dsn "$DATABASE_URL" \
             --admin-dsn "$ADMIN_DATABASE_URL" \
             --verbose

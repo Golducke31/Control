@@ -1273,6 +1273,16 @@ GRANT SELECT ON purchasing.supplier_invoice_items TO control_readonly;
 GRANT SELECT ON purchasing.supplier_payments   TO control_readonly;
 GRANT SELECT ON purchasing.payment_allocations TO control_readonly;
 
+-- Las vistas son objetos de pleno derecho y NO quedan cubiertas por el GRANT de
+-- las tablas de las que dependen. Una vista sin `GRANT SELECT` devuelve
+-- `permiso denegado` aunque el rol pueda leer todas sus tablas base — y ese error
+-- aparece recién cuando alguien consulta la vista, no al aplicar la migración.
+-- Por eso van explícitas acá y también en `ALTER DEFAULT PRIVILEGES` de abajo:
+-- una vista nueva en `purchasing` no debería requerir acordarse de este bloque.
+GRANT SELECT ON purchasing.v_pending_receipts  TO control_app, control_readonly;
+GRANT SELECT ON purchasing.v_supplier_balances TO control_app, control_readonly;
+GRANT SELECT ON purchasing.v_payables_aging    TO control_app, control_readonly;
+
 GRANT EXECUTE ON FUNCTION purchasing.receive_order_line(uuid, uuid, numeric, numeric, uuid, text) TO control_app;
 GRANT EXECUTE ON FUNCTION purchasing.refresh_order_status(uuid, uuid)          TO control_app;
 GRANT EXECUTE ON FUNCTION purchasing.apply_supplier_payment(uuid, uuid, date, text, numeric, jsonb, text, text) TO control_app;
@@ -1284,10 +1294,18 @@ GRANT EXECUTE ON FUNCTION purchasing.seed_tenant_purchasing_config(uuid)       T
 -- Por defecto, para las tablas que se agreguen a `purchasing` en el futuro. Sin
 -- esto, cada tabla nueva requiere acordarse de los GRANT — y olvidarlo se
 -- manifiesta como un error de permisos en producción, no en los tests.
+--
+-- Las vistas se declaran aparte porque son un tipo de objeto distinto: un GRANT
+-- sobre `TABLES` no alcanza a las vistas, y una vista creada después de esta
+-- migración quedaría sin acceso con el mismo síntoma silencioso.
 ALTER DEFAULT PRIVILEGES IN SCHEMA purchasing
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO control_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA purchasing
   GRANT SELECT ON TABLES TO control_readonly;
+ALTER DEFAULT PRIVILEGES IN SCHEMA purchasing
+  GRANT SELECT ON SEQUENCES TO control_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA purchasing
+  GRANT SELECT ON SEQUENCES TO control_readonly;
 
 -- -----------------------------------------------------------------------------
 -- 14 · Job de verificación de asientos de compras
