@@ -6,12 +6,23 @@
  * QUÉ HACE
  *
  * Descubre todas las suites `tests/<area>/run.mjs`, extrae cada template literal
- * y, para los que contienen SQL, verifica tres cosas que `node --check` no puede
- * ver porque para el parser de JavaScript son sólo texto:
+ * y, para los que contienen SQL, verifica cuatro cosas que `node --check` no
+ * puede ver porque para el parser de JavaScript son sólo texto:
  *
  *   1. Paréntesis balanceados.
  *   2. Cantidad PAR de comillas simples (un apóstrofo suelto rompe el bloque).
  *   3. Cada BEGIN tiene su COMMIT o su ROLLBACK.
+ *   4. Ningún comentario SQL `--` contiene un backtick.
+ *
+ * POR QUÉ LA CUARTA
+ *
+ * Un backtick dentro de un comentario `--` que a su vez vive dentro de un
+ * template literal CIERRA el template. El SQL que sigue queda fuera de la
+ * cadena y, según lo que venga, el archivo puede seguir siendo JavaScript
+ * válido — sólo que ejecutando otra cosa. Ya pasó CUATRO veces durante la fase
+ * E4, y en tres de esos casos `node --check` pasó sin chistar: el daño era
+ * silencioso. La línea que lo delata es cómoda de escribir y letal de leer, así
+ * que la red tiene que ser mecánica.
  *
  * POR QUÉ DESCUBRE EN VEZ DE TENER UNA LISTA
  *
@@ -72,6 +83,60 @@ function discoverFiles() {
 }
 
 /**
+ * Detecta backticks dentro de comentarios SQL `--` que viven dentro de un
+ * template literal.
+ *
+ * POR QUÉ NO SE HACE CON EL TEMPLATE YA EXTRAÍDO
+ *
+ * El propio extractor (`/`([^`]*)`/gs`) es la víctima del defecto: si un
+ * backtick cierra el template antes de tiempo, `body` ya viene truncado y el
+ * comentario dañino queda afuera. Para encontrar el problema hay que mirar el
+ * archivo crudo, no el resultado de una extracción que el problema ya corrompió.
+ *
+ * CÓMO LO ENCUENTRA SIN PARSEAR
+ *
+ * Se recorre el archivo crudo línea por línea llevando la cuenta de en qué
+ * template estamos (los backticks de apertura/cierre alternan, y ninguno se
+ * escapa en este código). Dentro de un template, una línea se considera un
+ * comentario SQL si su primer carácter no blanco es `--`. Si además contiene un
+ * backtick, esa línea es la que cierra el template: se reporta con su número.
+ *
+ * Sólo se revisan las líneas que ABREN el comentario. Un backtick comentado a
+ * mitad de una línea (después de SQL real) sigue siendo peligroso, pero no
+ * aparece nunca en este proyecto y perseguirlo exigiría parsear SQL de verdad.
+ */
+function checkBackticksInSqlComments(file, src) {
+  const problemas = [];
+  let dentroDeTemplate = false;
+
+  const lineas = src.split('\n');
+  for (let i = 0; i < lineas.length; i += 1) {
+    const linea = lineas[i];
+    const backticks = (linea.match(/`/g) || []).length;
+
+    // Sólo importa si estamos dentro de un template en el momento de abrir la
+    // línea. Una línea con un número impar de backticks invierte el estado.
+    const abriaDentro = dentroDeTemplate;
+
+    if (abriaDentro && /^\s*--/.test(linea) && backticks > 0) {
+      problemas.push(i + 1);
+    }
+
+    if (backticks % 2 === 1) dentroDeTemplate = !dentroDeTemplate;
+  }
+
+  if (problemas.length > 0) {
+    for (const linea of problemas) {
+      console.error(
+        `  \u2717 ${file} · línea ${linea}: comentario SQL con backtick dentro de un template ` +
+          `(el backtick cierra la cadena y el SQL queda fuera)`
+      );
+    }
+  }
+  return problemas.length;
+}
+
+/**
  * Revisa un archivo y devuelve { checked, problems }. Los problemas se imprimen
  * con el nombre del archivo adelante: con varias suites, un mensaje anónimo
  * obliga a buscar el bloque a mano.
@@ -87,10 +152,13 @@ function checkFile(file, { verbose }) {
 
   if (verbose) console.log(`\n── ${file}`);
 
+  // Va primero y sobre el archivo crudo: si hay un backtick suelto, la
+  // extracción de templates de abajo ya está corrupta y sus resultados no valen.
+  let problems = checkBackticksInSqlComments(file, src);
+
   const re = /`([^`]*)`/gs;
   let m;
   let checked = 0;
-  let problems = 0;
 
   while ((m = re.exec(src))) {
     const body = m[1];

@@ -368,6 +368,81 @@ jobs:
             --verbose
 
   # ---------------------------------------------------------------------------
+  # 3 ter · Cobros y tesorería (puerta E4 del plan ERP).
+  #
+  #     Mide la puerta, no la declara: §7.1 la define como "el saldo de tesorería
+  #     cuadra con los movimientos" y §6.2 la desglosa en T-1..T-7. La suite recorre
+  #     la cadena completa —el cliente debe, cobra, el dinero entra a una cuenta y
+  #     el saldo de esa cuenta refleja el cobro— porque una suite que probara cada
+  #     migración por separado podría estar verde con la cadena rota en el medio.
+  #
+  #     Encontró dos defectos reales antes de llegar a verde, y los dos valen para
+  #     entender por qué el job existe:
+  #
+  #       · 0015 bloqueaba el cobro de toda factura autorizada. La política
+  #         RESTRICTIVE de 0006 (`status <> 'authorized'` para UPDATE) alcanzaba
+  #         también al FOR UPDATE y al UPDATE de los acumuladores de cobro. El
+  #         síntoma era "La factura <uuid> no existe en esta empresa" señalando una
+  #         factura que estaba a la vista, y un UPDATE que afectaba 0 filas sin
+  #         error: la cobranza se registraba y el saldo del cliente no bajaba.
+  #         Corregido en 0015 con una política acotada y un trigger que compara la
+  #         fila vieja con la nueva.
+  #
+  #       · El saldo de apertura de una cuenta declarado en `opening_balance` no
+  #         estaba atado a su movimiento, así que el gate de E4 podía dar verde con
+  #         el saldo declarado divergiendo del derivado.
+  #
+  #     Necesita los DOS DSN por la misma razón que compras: la limpieza del
+  #     escenario toca `treasury.movements`, que es inmutable para el rol de
+  #     aplicación (el UPDATE está revocado Y hay un trigger que lo rechaza).
+  # ---------------------------------------------------------------------------
+  treasury:
+    name: Invariantes de cobros y tesorería
+    runs-on: ubuntu-latest
+    needs: migrations
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+      DATABASE_URL: postgres://app_login:AppL0gin!@localhost:5432/control_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Preparar esquema
+        run: |
+          set -euo pipefail
+          for f in $(ls db/migrations/*.sql | sort); do
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+
+      - name: Crear el rol de aplicación
+        run: |
+          set -euo pipefail
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE app_login LOGIN PASSWORD 'AppL0gin!' NOBYPASSRLS IN ROLE control_app;"
+
+      - name: Ejecutar invariantes de cobros y tesorería
+        run: |
+          node tests/treasury/run.mjs \
+            --dsn "$DATABASE_URL" \
+            --admin-dsn "$ADMIN_DATABASE_URL" \
+            --verbose
+
+  # ---------------------------------------------------------------------------
   # 4 · TypeScript de la API.
   #
   #     Existía un job "probe" que salteaba todo si no encontraba `package.json`
