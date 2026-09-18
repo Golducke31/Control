@@ -10,7 +10,7 @@ Diseñado para operar en Argentina, con foco en distribuidoras, comercios y oper
 
 1. [Resumen ejecutivo](#1-resumen-ejecutivo)
 2. [Arquitectura del sistema](#2-arquitectura-del-sistema)
-3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls)
+3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls) — incluye las trampas de RLS en tablas particionadas
 4. [Autenticación y autorización](#4-autenticación-y-autorización)
 5. [Integración AFIP: flujo completo](#5-integración-afip-flujo-completo)
 6. [Stock, depósitos y trazabilidad](#6-stock-depósitos-y-trazabilidad)
@@ -19,7 +19,7 @@ Diseñado para operar en Argentina, con foco en distribuidoras, comercios y oper
 9. [Exportaciones XLSX y PDF](#9-exportaciones-xlsx-y-pdf)
 10. [Seguridad](#10-seguridad)
 11. [Estructura del repositorio](#11-estructura-del-repositorio)
-12. [Puesta en marcha](#12-puesta-en-marcha)
+12. [Puesta en marcha](#12-puesta-en-marcha) — incluye la suite de aislamiento
 13. [Roadmap](#13-roadmap)
 
 ---
@@ -395,14 +395,51 @@ CREATE VIEW app.v_low_stock WITH (security_invoker = true) AS ...
 
 Sin `security_invoker = true`, una vista se ejecuta con los privilegios de su **owner** y **bypassea RLS**. Una vista de reporte sin esta opción es una fuga de datos entre inquilinos esperando a ocurrir. PostgreSQL 15+ (o `security_invoker` retroportado). Todas las vistas del proyecto lo llevan.
 
-### 3.5 Rendimiento
+### 3.5 Tablas particionadas: las políticas NO se heredan
+
+Esta es la trampa más sutil del aislamiento con RLS, y merece su propia sección porque **falla en silencio**.
+
+PostgreSQL evalúa las políticas de la tabla que se consulta. Si `audit.events` está declarada `PARTITION BY RANGE (created_at)` y se crean políticas sobre el **padre**, esas políticas **no** se aplican a `events_2026_09`, `events_2026_10` ni `events_default`. Cada partición necesita su propia copia. La documentación de PostgreSQL lo dice explícitamente: *"row-level security policies are not inherited by partitions"*.
+
+El resultado es un agujero que ninguna revisión de código detecta leyendo el archivo de políticas, porque el archivo está bien. El problema está en la interacción entre dos archivos que se ven correctos por separado.
+
+**Cómo se corrigió** (migración `0008`):
+
+```sql
+-- Copia las políticas del padre a TODAS sus particiones, actuales y futuras.
+SELECT app.apply_partition_rls('audit', 'events');
+SELECT app.apply_partition_rls('logistics', 'position_pings');
+```
+
+Y para que no vuelva a ocurrir, la creación de particiones quedó encapsulada de modo que la única forma de crear una es la que deja el aislamiento puesto (migración `0009`):
+
+```sql
+-- Crea la partición mensual Y le aplica RLS del padre, en la misma llamada.
+SELECT app.ensure_month_partition('audit', 'events', '2026-11-01');
+```
+
+**La barrera que falla el build** (migración `0008`):
+
+```sql
+SELECT app.assert_rls_coverage();
+```
+
+Recorre el catálogo real y lanza excepción si alguna tabla o partición de negocio carece de `FORCE RLS` o de política. Se ejecuta al final de las migraciones y en CI. Un PR que agregue una tabla sin política falla el pipeline en lugar de llegar a producción.
+
+> **Regla operativa:** nunca crear una partición con `CREATE TABLE ... PARTITION OF` suelto. Usar `app.ensure_month_partition()`, que aplica la cobertura en la misma transacción. No existe ventana en la que la partición exista sin protección.
+
+### 3.6 Vistas de monitoreo de particiones
+
+`audit.v_default_partition_usage` expone cuántas filas cayeron en la partición `DEFAULT`. Cualquier valor mayor a cero significa que el job de mantenimiento se detuvo y los datos están entrando a un cajón sin política propia. Es una alerta temprana, no un reporte.
+
+### 3.7 Rendimiento
 
 - **Índices con `tenant_id` como primera columna.** `(tenant_id, created_at DESC)`. El planificador descarta el `tenant_id` en el filtro de índice y usa las siguientes columnas para ordenar, evitando un sort.
 - **Índices parciales** para las consultas calientes: `WHERE status IN ('draft','queued')` sobre `invoices`, `WHERE available <= 0` sobre `stock_levels`.
 - **Particionado** por rango mensual en `position_pings` (~2-5 M filas/mes en una flota mediana) y `audit.events`.
 - **Filtro de fila temprano:** con RLS, PostgreSQL agrega el predicado de la política al plan. Si hay un índice sobre `tenant_id`, el costo por consulta es prácticamente el de un inquilino único.
 
-### 3.6 Consistencia de stock
+### 3.8 Consistencia de stock
 
 El stock no se actualiza desde la aplicación: se pasa por una única función con lógica transaccional.
 
@@ -930,6 +967,9 @@ Los gráficos embebidos en el PDF se validan como SVG bien formado antes de inye
 ```
 Control/
 ├── README.md
+├── .github/
+│   └── workflows/
+│       └── ci.yml                                # Migraciones, lint RLS, aislamiento, secretos
 ├── db/
 │   ├── migrations/
 │   │   ├── 0001_extensions_and_helpers.sql    # Extensiones, tipos, helpers de sesión
@@ -938,7 +978,9 @@ Control/
 │   │   ├── 0004_sales_and_afip.sql            # Ventas, comprobantes, credenciales AFIP
 │   │   ├── 0005_logistics_and_tracking.sql    # Transporte, envíos, tracking, POD
 │   │   ├── 0006_rls_policies.sql              # ★ Políticas RLS de aislamiento
-│   │   └── 0007_hardening_and_audit.sql       # Roles, grants, auditoría, lógica de stock
+│   │   ├── 0007_hardening_and_audit.sql       # Roles, grants, auditoría, lógica de stock
+│   │   ├── 0008_rls_partition_coverage.sql    # ★ RLS en particiones + aserción de cobertura
+│   │   └── 0009_partition_maintenance.sql     # Creación de particiones con RLS heredado
 │   └── seed/
 │       └── 0001_system_catalog.sql            # Permisos, roles de sistema, plantillas
 ├── apps/
@@ -950,10 +992,22 @@ Control/
 │           │   ├── afip/
 │           │   │   ├── wsaa.client.ts              # Autenticación AFIP (TRA, CMS, TA)
 │           │   │   └── wsfe.client.ts              # Emisión de CAE (FECAESolicitar)
+│           │   ├── fiscal/
+│           │   │   ├── fiscal-driver.ts            # Contrato neutral multi-país
+│           │   │   └── drivers/
+│           │   │       └── afip.driver.ts          # Implementación AFIP del contrato
 │           │   └── exports/
 │           │       └── report.service.ts           # XLSX/PDF con identidad dinámica
 │           └── realtime/
 │               └── tracking.service.ts             # WS/SSE, bus por tenant, máquina de estados
+├── tests/
+│   └── isolation/
+│       ├── run.mjs                             # ★ Suite de aislamiento multi-tenant
+│       └── lint_rls_coverage.sql               # Lint de PR: tabla sin política
+├── tools/
+│   └── validate-workflow.mjs                   # Validador estructural del CI
+├── docs/
+│   └── PLAN-PRODUCCION.md                      # Plan a producción multinacional
 └── prototype/
     └── index.html                                  # Dashboard glassmorphism funcional
 ```
@@ -964,11 +1018,15 @@ Control/
 |---|---|
 | [`db/migrations/0006_rls_policies.sql`](db/migrations/0006_rls_policies.sql) | Las políticas RLS. Es el archivo que materializa el aislamiento. |
 | [`db/migrations/0007_hardening_and_audit.sql`](db/migrations/0007_hardening_and_audit.sql) | Roles de DB, `set_tenant_context`, auditoría con hash chain, `apply_stock_movement`. |
+| [`db/migrations/0008_rls_partition_coverage.sql`](db/migrations/0008_rls_partition_coverage.sql) | RLS en particiones (`apply_partition_rls`) y `assert_rls_coverage()`. |
+| [`db/migrations/0009_partition_maintenance.sql`](db/migrations/0009_partition_maintenance.sql) | `ensure_month_partition()`: crear particiones sin perder el aislamiento. |
 | [`apps/api/src/modules/tenancy/tenant-context.service.ts`](apps/api/src/modules/tenancy/tenant-context.service.ts) | `withTenant()`, middleware HTTP, guard de permisos. |
 | [`apps/api/src/modules/afip/wsaa.client.ts`](apps/api/src/modules/afip/wsaa.client.ts) | TRA, firma CMS, login, cache y lock del TA. |
 | [`apps/api/src/modules/afip/wsfe.client.ts`](apps/api/src/modules/afip/wsfe.client.ts) | Catálogos AFIP, armado del request, emisión, recuperación. |
+| [`apps/api/src/modules/fiscal/fiscal-driver.ts`](apps/api/src/modules/fiscal/fiscal-driver.ts) | Contrato neutral para el motor fiscal multi-país. |
 | [`apps/api/src/realtime/tracking.service.ts`](apps/api/src/realtime/tracking.service.ts) | Bus por tenant, SSE/WS, backpressure, máquina de estados. |
 | [`apps/api/src/modules/exports/report.service.ts`](apps/api/src/modules/exports/report.service.ts) | Contraste WCAG, sanitizador, motor de temas, XLSX y PDF. |
+| [`tests/isolation/run.mjs`](tests/isolation/run.mjs) | Suite de aislamiento: cobertura, lectura, escritura, fail-closed. |
 | [`prototype/index.html`](prototype/index.html) | Prototipo funcional. Abrir en el navegador. |
 
 ---
@@ -981,13 +1039,12 @@ Control/
 # PostgreSQL 16 o superior (requiere security_invoker en vistas: PG 15+)
 createdb control
 
-psql -d control -v ON_ERROR_STOP=1 -f db/migrations/0001_extensions_and_helpers.sql
-psql -d control -v ON_ERROR_STOP=1 -f db/migrations/0002_tenancy_and_identity.sql
-psql -d control -v ON_ERROR_STOP=1 -f db/migrations/0003_catalog_and_stock.sql
-psql -d control -v ON_ERROR_STOP=1 -f db/migrations/0004_sales_and_afip.sql
-psql -d control -v ON_ERROR_STOP=1 -f db/migrations/0005_logistics_and_tracking.sql
-psql -d control -v ON_ERROR_STOP=1 -f db/migrations/0006_rls_policies.sql
-psql -d control -v ON_ERROR_STOP=1 -f db/migrations/0007_hardening_and_audit.sql
+# Las migraciones se aplican en orden. La 0008 falla a propósito si la
+# cobertura RLS quedó incompleta, así que actúa como verificación al final.
+for f in $(ls db/migrations/*.sql | sort); do
+  psql -d control -v ON_ERROR_STOP=1 -f "$f"
+done
+
 psql -d control -v ON_ERROR_STOP=1 -f db/seed/0001_system_catalog.sql
 ```
 
@@ -1034,7 +1091,27 @@ ROLLBACK;
 
 La prueba 3 es la más importante: **sin contexto debe devolver cero filas**, no todas. Un sistema que devuelve todo cuando falta el contexto tiene una fuga en el caso de error, que es exactamente cuando ocurre.
 
-### 12.4 Prototipo
+### 12.4 Suite automatizada de aislamiento
+
+La verificación manual sirve para entender el mecanismo; la suite automatizada es la que protege el sistema en cada cambio:
+
+```bash
+DATABASE_URL="postgres://user:pass@host:5432/control" node tests/isolation/run.mjs --verbose
+```
+
+La suite **descubre las tablas desde `pg_class`**, no desde una lista escrita a mano. Para cada tabla con `tenant_id` verifica:
+
+| Grupo | Verificación |
+|---|---|
+| **A · Cobertura** | `FORCE RLS` activo, al menos una política, ninguna política permisiva con `USING (true)`, y cada partición con su propia cobertura. |
+| **B · Lectura** | Con contexto de A, cero filas de B. Y A sí ve las suyas — un filtro demasiado agresivo también es un bug. |
+| **C · Escritura** | `UPDATE`/`DELETE` sobre filas ajenas afectan 0 filas; `INSERT` con `tenant_id` ajeno y reasignación de una fila propia a otro inquilino fallan por `WITH CHECK`. |
+| **D · Fail-closed** | Sin contexto, cero filas en todas las tablas. Además comprueba que un `SET` sin `LOCAL` no deja el inquilino pegado en la conexión. |
+| **E · Aserción** | `app.assert_rls_coverage()` existe y pasa sobre el esquema actual. |
+
+La suite corre en CI sobre una base migrada desde cero en cada PR ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Junto con `tests/isolation/lint_rls_coverage.sql`, materializa el criterio **F0-AC2** del plan: *un PR con una tabla nueva sin política RLS falla el pipeline antes de que lo vea un revisor.*
+
+### 12.5 Prototipo
 
 Abrir `prototype/index.html` en cualquier navegador. No requiere build ni servidor: es autocontenido. Funcionalidades demostrables:
 
@@ -1067,6 +1144,11 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Tests de integración** contra AFIP homologación con un CUIT de prueba.
 - **Frontend de producción.** El prototipo valida el diseño; falta la implementación en Next.js con componentes reutilizables.
 - **Reconciliación de stock.** Se define la estructura del libro mayor; falta el job que detecta y reporta discrepancias entre `stock_levels` y la suma de `stock_movements`.
+- **Job de mantenimiento de particiones.** `app.ensure_partitions_ahead()` está implementada y probada, pero falta el scheduler que la invoque mensualmente y la alerta sobre `audit.v_default_partition_usage`.
+
+### Resuelto en esta entrega
+
+- **Aislamiento RLS en tablas particionadas.** Las políticas declaradas sólo sobre el padre no alcanzaban a las particiones. Corregido en `0008`, con la barrera `assert_rls_coverage()` que falla el build ante cualquier tabla nueva sin política, y `0009` para que las particiones futuras nazcan protegidas. Ver [§3.5](#35-tablas-particionadas-las-políticas-no-se-heredan).
 
 ---
 

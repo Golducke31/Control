@@ -1,0 +1,214 @@
+# =============================================================================
+# Control · Pipeline de integración continua
+# -----------------------------------------------------------------------------
+# Objetivo central: que una falla de aislamiento multi-tenant no pueda llegar a
+# `main`. El job `isolation` es el más importante del pipeline — es el que
+# materializa el criterio F0-AC2 del plan de producción: un PR que agrega una
+# tabla sin política RLS debe fallar.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PG_VERSION: '16'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1 · Migraciones: se aplican desde cero sobre una base limpia. Si una
+  #     migración no es reproducible, todo lo demás es irrelevante.
+  # ---------------------------------------------------------------------------
+  migrations:
+    name: Migraciones desde cero
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Aplicar migraciones en orden
+        run: |
+          set -euo pipefail
+          for f in $(ls db/migrations/*.sql | sort); do
+            echo "▶ $f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: Aplicar catálogo del sistema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+
+      - name: Verificar que la aserción de cobertura pasa
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT app.assert_rls_coverage();"
+
+  # ---------------------------------------------------------------------------
+  # 2 · Lint de cobertura RLS. Rápido, sin datos: detecta la tabla nueva sin
+  #     política antes de que llegue a revisión humana.
+  # ---------------------------------------------------------------------------
+  rls-lint:
+    name: Lint de cobertura RLS
+    runs-on: ubuntu-latest
+    needs: migrations
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar esquema
+        run: |
+          set -euo pipefail
+          for f in $(ls db/migrations/*.sql | sort); do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+
+      - name: Ejecutar lint (falla si hay filas)
+        run: |
+          set -euo pipefail
+          OUT=$(psql "$DATABASE_URL" -t -A -f tests/isolation/lint_rls_coverage.sql \
+                | grep -v '^$' | grep -v '^Recordatorio' || true)
+          if [ -n "$OUT" ]; then
+            echo "::error::Defectos de cobertura RLS detectados"
+            echo "$OUT"
+            exit 1
+          fi
+          echo "Cobertura RLS completa."
+
+  # ---------------------------------------------------------------------------
+  # 3 · Suite de aislamiento con datos reales de dos inquilinos. Es la prueba
+  #     que de verdad importa: verifica lectura, escritura y fail-closed.
+  # ---------------------------------------------------------------------------
+  isolation:
+    name: Aislamiento multi-tenant
+    runs-on: ubuntu-latest
+    needs: migrations
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Preparar esquema
+        run: |
+          set -euo pipefail
+          for f in $(ls db/migrations/*.sql | sort); do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+
+      - name: Ejecutar suite de aislamiento
+        run: node tests/isolation/run.mjs --verbose
+
+  # ---------------------------------------------------------------------------
+  # 4 · TypeScript de la API. Se compila sin emitir para detectar errores de
+  #     tipos. Se activa cuando exista `package.json` en la raíz.
+  # ---------------------------------------------------------------------------
+  typecheck:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detectar proyecto Node
+        id: probe
+        run: |
+          if [ -f package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "Sin package.json todavía: se omite el typecheck."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.probe.outputs.present == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        if: steps.probe.outputs.present == 'true'
+        run: npm ci
+
+      - name: tsc --noEmit
+        if: steps.probe.outputs.present == 'true'
+        run: npx tsc --noEmit
+
+  # ---------------------------------------------------------------------------
+  # 5 · Guardia de secretos: certificados AFIP y claves nunca deben entrar al
+  #     repositorio. Un `.pem` commiteado es un incidente de seguridad.
+  # ---------------------------------------------------------------------------
+  secret-guard:
+    name: Guardia de secretos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Buscar credenciales en el árbol
+        run: |
+          set -euo pipefail
+          FOUND=$(git ls-files | grep -E '\.(pem|key|crt|p12|pfx)$' || true)
+          if [ -n "$FOUND" ]; then
+            echo "::error::Certificados o claves versionados:"
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "Sin credenciales versionadas."
+
+      - name: Buscar .env versionados
+        run: |
+          set -euo pipefail
+          FOUND=$(git ls-files | grep -E '(^|/)\.env' | grep -v '\.env\.example' || true)
+          if [ -n "$FOUND" ]; then
+            echo "::error::Archivos .env versionados:"
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "Sin .env versionados."
