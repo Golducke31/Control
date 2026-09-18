@@ -513,12 +513,147 @@ export const stockReconciliationJob: JobDefinition = {
   },
 };
 
+/**
+ * Verificación de asientos faltantes: recorre los hechos económicos del sistema
+ * y reporta los que deberían tener asiento contable y no lo tienen.
+ *
+ * QUÉ ES UN "HECHO SIN ASIENTO"
+ *
+ * Un comprobante de venta autorizado por AFIP, o una salida de inventario
+ * valuada. En los dos casos el negocio ya registró un hecho con consecuencias
+ * económicas. Si ese hecho no tiene su asiento, el libro diario miente: el
+ * balance no refleja la realidad, y el error no se ve —el libro cuadra, porque
+ * un asiento que falta no descuadra nada—.
+ *
+ * POR QUÉ REPORTA EN VEZ DE GENERAR
+ *
+ * Sería tentador que este job creara los asientos que faltan. No lo hace, y la
+ * razón es la decisión 3 del ADR 0002: un asiento se genera en la MISMA
+ * transacción que el hecho. Un asiento creado a posteriori, por un job que corre
+ * de madrugada, tiene una fecha contable que no es la del hecho y un orden que
+ * no es el del libro. Peor: silenciaría el síntoma. El hecho de que falte un
+ * asiento significa que un camino del sistema se salteó la generación, y esa es
+ * la información que hay que preservar, no tapar. Es el mismo criterio que
+ * `stock.reconciliation`, que reporta la divergencia en lugar de corregirla.
+ *
+ * El backfill de hechos históricos sí existe, pero es una operación explícita y
+ * auditada, no el comportamiento por defecto de un job nocturno.
+ *
+ * LA VISTA SÓLO VE LO QUE EL RLS LE DEJA
+ *
+ * `accounting.v_posting_gaps` es `security_invoker`, así que el RLS de
+ * `billing.invoices` y `app.stock_movements` se aplica a quien consulta. Este
+ * job es transversal a todas las empresas, así que corre en MODO PLATAFORMA:
+ * sin `app.platform_admin = 'on'` la vista devuelve cero filas y el job
+ * reportaría "cero hechos sin asiento" para siempre, en silencio. Es el modo de
+ * falla que `assertPlatformMode()` existe para atrapar en el arranque; acá se
+ * agrega el control de cordura sobre el conteo de hechos comparados.
+ */
+export const accountingPostingCheckJob: JobDefinition = {
+  code: 'accounting.posting_check',
+  async run({ client, log }) {
+    // Contexto de plataforma explícito. Sin esto, la vista —que es
+    // security_invoker— filtra por el tenant activo (o por ninguno) y devuelve
+    // 0 filas, que es indistinguible de "todo asentado".
+    await client.query('SELECT app.set_tenant_context(NULL, NULL, true)');
+
+    const { rows } = await client.query<{
+      tenant_id: string;
+      source_type: string;
+      source_id: string;
+      event_kind: string;
+      happened_on: string;
+      gap_description: string;
+    }>(`
+      SELECT tenant_id, source_type, source_id, event_kind,
+             happened_on::text, gap_description
+      FROM accounting.v_posting_gaps
+      ORDER BY happened_on, tenant_id, source_type, source_id
+    `);
+
+    // Control de cordura: cuántos hechos ECONÓMICOS existen en total. Es la
+    // diferencia entre "revisé 40.000 hechos y todos tienen asiento" y "no vi
+    // nada porque el modo plataforma no se aplicó". Sin este número, un cero en
+    // `gaps` es ambiguo, y un job que no puede distinguir "todo bien" de "no
+    // miré nada" no sirve como alarma.
+    //
+    // Se cuentan sólo los hechos que DEBERÍAN tener asiento —los mismos
+    // predicados que la vista—, no todas las facturas ni todos los movimientos:
+    // comparar contra un universo distinto haría que el número no significara
+    // nada respecto de las brechas que se informan.
+    const universes = await client.query<{ invoices: string; movements: string }>(`
+      SELECT
+        (SELECT count(*) FROM billing.invoices WHERE status = 'authorized')::text
+          AS invoices,
+        (SELECT count(*) FROM app.stock_movements
+          WHERE kind = 'sale_out' AND unit_cost IS NOT NULL AND unit_cost <> 0)::text
+          AS movements
+    `);
+
+    const invoices = Number(universes.rows[0]?.invoices ?? '0');
+    const movements = Number(universes.rows[0]?.movements ?? '0');
+    const factsExpectedToPost = invoices + movements;
+
+    // Si hay hechos en el sistema pero la vista no devolvió ninguna fila Y
+    // tampoco hay brechas, el resultado es correcto. Pero si el conteo de hechos
+    // también es cero, hay que decirlo: puede ser una instalación nueva (nada
+    // que verificar) o un modo plataforma que no se aplicó. El job no puede
+    // distinguirlas, así que lo deja asentado en el log y en `outcome` en vez de
+    // reportar un "todo en orden" que no puede sostener.
+    if (factsExpectedToPost === 0) {
+      log(
+        'no hay hechos económicos registrados: nada que verificar. ' +
+          'Si el sistema está en operación, revisar que el modo plataforma se haya aplicado.'
+      );
+    }
+
+    // El detalle va al log para poder investigar sin consultar la base.
+    for (const g of rows.slice(0, 20)) {
+      log(
+        `hecho sin asiento: ${g.gap_description} — inquilino ${g.tenant_id} ` +
+          `${g.source_type}/${g.event_kind} ${g.source_id} del ${g.happened_on}`
+      );
+    }
+    if (rows.length > 20) {
+      log(`… y ${rows.length - 20} hecho(s) sin asiento más`);
+    }
+
+    // Desglose por origen. Sin esto, una brecha en facturación y una en stock se
+    // ven como el mismo número, y no se investigan igual.
+    const bySource: Record<string, number> = {};
+    for (const g of rows) {
+      bySource[g.source_type] = (bySource[g.source_type] ?? 0) + 1;
+    }
+
+    return {
+      factsExpectedToPost,
+      invoices,
+      movements,
+      gaps: rows.length,
+      bySource,
+      // Muestra acotada: `outcome` es jsonb en el ledger y crece con cada
+      // corrida. Guardar todas las brechas de cada día convertiría el ledger en
+      // una tabla de datos de negocio en vez de un registro de ejecuciones.
+      sample: rows.slice(0, 50).map((g) => ({
+        tenantId: g.tenant_id,
+        sourceType: g.source_type,
+        sourceId: g.source_id,
+        eventKind: g.event_kind,
+        happenedOn: g.happened_on,
+        description: g.gap_description,
+      })),
+      truncated: rows.length > 50,
+    };
+  },
+};
+
 /** Catálogo de jobs que expone este runner. */
 export const JOB_DEFINITIONS: JobDefinition[] = [
   partitionMaintenanceJob,
   partitionRetentionJob,
   certificateExpiryJob,
   stockReconciliationJob,
+  accountingPostingCheckJob,
   outboxReaperJob,
 ];
 
@@ -538,5 +673,13 @@ export const JOB_SCHEDULE: Record<string, string> = {
   // particiones (03:00) y de la purga (04:00). El orden importa: si corriera
   // antes, compararía contra un libro que está a punto de cambiar.
   'stock.reconciliation': '30 4 * * *', // diario, 04:30
+  // La verificación de asientos corre a las 05:00, después de la reconciliación
+  // de stock (04:30) y bastante después del cierre operativo del día. La hora es
+  // deliberada: los asientos se generan DENTRO de la transacción del hecho, así
+  // que una brecha detectada a las 05:00 ya no es una carrera en curso —es un
+  // camino que se salteó la generación—, y eso es lo que hay que investigar. Si
+  // corriera durante el horario comercial, cada venta en vuelo sería una falsa
+  // alarma y el job se volvería ruido.
+  'accounting.posting_check': '0 5 * * *', // diario, 05:00
   'outbox.reaper': '*/15 * * * *', // cada 15 minutos
 };

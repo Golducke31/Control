@@ -20,6 +20,13 @@
  * `docs/adr/0002-motor-asientos-automaticos.md`): idempotencia del generador,
  * traducción hecho → líneas, omisión del IVA 0% y la vista de brechas.
  *
+ * La invariante 8 verifica además que los jobs contables registrados en
+ * `ops.jobs` tengan implementación. Un job en el ledger sin código queda
+ * agendado, se reporta como exitoso y no hace nada: el sistema dice "todo en
+ * orden" sin haber mirado. La contraparte en código de esa verificación es
+ * `apps/api/src/jobs/job-catalog.test.ts`, que corre sin base y atrapa la
+ * desincronización en el otro sentido (`JOB_SCHEDULE` sin `JOB_DEFINITIONS`).
+ *
  * POR QUÉ CADA PRUEBA ES UNA CONEXIÓN APARTE
  *
  * Un CONSTRAINT TRIGGER diferido que falla ABORTA la transacción. Si todas las
@@ -259,6 +266,12 @@ async function setup() {
   console.log('\n\u25b6 Preparación del escenario');
 
   // Limpieza idempotente. El orden respeta las claves foráneas.
+  //
+  // Las tablas de catálogo y de stock se limpian porque la invariante 14 inserta
+  // un movimiento huérfano para probar que la vista de brechas lo delata. Sin
+  // esto, la segunda corrida de la suite arrastraría ese movimiento y la
+  // aserción de "0 brechas con el libro al día" fallaría —un fallo del arnés que
+  // parece un defecto de la vista.
   await sqlAdmin(`
 BEGIN;
 SELECT app.set_tenant_context(NULL, NULL, true);
@@ -269,6 +282,12 @@ DELETE FROM accounting.account_balances WHERE tenant_id IN ('${TENANT_A}', '${TE
 DELETE FROM accounting.journal_entries WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM accounting.periods         WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM accounting.fiscal_years    WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.stock_movements        WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.stock_levels           WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.warehouses             WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.product_variants       WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.products               WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.brands                 WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM app.tenants                WHERE id        IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM app.users                  WHERE id        IN ('${USER_A}', '${USER_B}');
 COMMIT;
@@ -878,16 +897,70 @@ ORDER BY c.relname;
 // Invariante 8 · El job de verificación quedó registrado
 // =============================================================================
 async function testJobRegistered() {
-  console.log('\n\u25b6 Invariante 8 · job de reconciliación registrado en el ledger');
+  console.log('\n\u25b6 Invariante 8 · jobs contables registrados en el ledger');
 
   const row = await sqlAdmin(`
 BEGIN;
 SELECT app.set_tenant_context(NULL, NULL, true);
-SELECT count(*)::text FROM ops.jobs WHERE code = 'accounting.reconciliation';
+SELECT count(*)::text FROM ops.jobs WHERE code = 'accounting.posting_check';
 COMMIT;
 `);
 
-  assert(row === '1', 'ops.jobs contiene accounting.reconciliation', `Encontrados: ${row}`);
+  assert(
+    row === '1',
+    'ops.jobs contiene accounting.posting_check',
+    `Encontrados: ${row}. Sin el registro, begin_job_run() lanza y el job nunca corre.`
+  );
+
+  // El registro tiene que declarar la cadencia esperada. `ops.v_job_health` la
+  // compara contra la realidad: sin `expected_every`, la vista no puede mostrar
+  // que el job está atrasado, y un job detenido deja de ser detectable.
+  const cadence = await sqlAdmin(`
+BEGIN;
+SELECT app.set_tenant_context(NULL, NULL, true);
+SELECT expected_every::text FROM ops.jobs WHERE code = 'accounting.posting_check';
+COMMIT;
+`);
+
+  assert(
+    cadence === '1 day',
+    'el job declara su cadencia esperada (1 día)',
+    `expected_every = ${cadence}`
+  );
+
+  // Y el job tiene que poder EJECUTARSE. Es la verificación que faltaba: un job
+  // registrado en el ledger y sin implementación en el catálogo queda agendado,
+  // se reporta como exitoso y no hace nada. Acá se corre el cuerpo real contra el
+  // esquema actual, que es lo que distingue "está implementado" de "está
+  // registrado".
+  const ejecucion = await trySql(`
+BEGIN;
+SELECT app.set_tenant_context(NULL, NULL, true);
+
+DO $$
+DECLARE
+  v_gaps integer;
+  v_facts integer;
+BEGIN
+  SELECT count(*) INTO v_gaps FROM accounting.v_posting_gaps;
+
+  SELECT (SELECT count(*) FROM billing.invoices WHERE status = 'authorized')
+       + (SELECT count(*) FROM app.stock_movements
+           WHERE kind = 'sale_out' AND unit_cost IS NOT NULL AND unit_cost <> 0)
+    INTO v_facts;
+
+  IF v_gaps < 0 OR v_facts < 0 THEN
+    RAISE EXCEPTION 'Conteos imposibles: gaps=%, facts=%', v_gaps, v_facts;
+  END IF;
+END $$;
+COMMIT;
+`);
+
+  assert(
+    ejecucion.ok,
+    'el job de verificación se ejecuta contra el esquema real sin error',
+    ejecucion.err
+  );
 }
 
 // =============================================================================
@@ -1095,6 +1168,10 @@ END $$;
 // "pasa" cualquier inspección visual y no controla nada: por eso se prueba en
 // las dos direcciones — primero con el libro al día (0 brechas), y después
 // insertando un hecho de origen sin asiento para exigir que lo delate.
+//
+// La segunda dirección es la que vale. La primera sólo confirma que la vista no
+// inventa brechas; la segunda confirma que las encuentra, que es para lo que
+// existe. Sin la segunda, una vista con `WHERE false` pasaría.
 // =============================================================================
 async function testPostingGapsView() {
   console.log('\n\u25b6 Invariante 14 · la vista de brechas delata un hecho sin asiento');
@@ -1109,18 +1186,115 @@ async function testPostingGapsView() {
     `Devolvió ${alDia} filas inesperadas.`
   );
 
-  // Se busca la tabla de origen que la vista consulta, para insertar un hecho
-  // que debería tener asiento y no lo tiene.
-  const fuentes = await sql(`
-SELECT string_agg(viewname::text, ', ')
-  FROM pg_views
- WHERE schemaname IN ('app', 'accounting')
-   AND definition ILIKE '%v_posting_gaps%';
-`);
+  // --- La dirección que importa: un hecho sin asiento tiene que aparecer. ---
+  //
+  // Se inserta un movimiento de stock de origen SIN llamar al generador. Es el
+  // escenario real que el job existe para detectar: un camino del sistema que
+  // salteó la generación del asiento. El movimiento tiene costo (si no, la vista
+  // lo ignora a propósito: un movimiento sin costo no mueve valor, así que no
+  // genera asiento) y es una salida (una reserva o una transferencia tampoco
+  // mueven valor entre cuentas).
+  //
+  // La inserción es por INSERT directo y no por `app.apply_stock_movement()`:
+  // acá se quiere el movimiento SIN su efecto lateral, que es precisamente el
+  // hecho huérfano que hay que delatar.
+  const GAP_SOURCE = '00000000-0000-4000-c000-0000000dead1';
+  const GAP_VARIANT = '00000000-0000-4000-c000-0000000dead2';
+  const GAP_WH = '00000000-0000-4000-c000-0000000dead3';
 
-  const definicion = await sql(`
-SELECT pg_get_viewdef('accounting.v_posting_gaps'::regclass, true);
-`);
+  const gap = await trySql(
+    withTenant(
+      TENANT_A,
+      `
+DO $$
+DECLARE
+  v_t uuid := '${TENANT_A}';
+  v_mov uuid := '${GAP_SOURCE}';
+  v_brand uuid;
+  v_product uuid;
+  v_variant uuid;
+  v_wh uuid;
+  v_found integer;
+BEGIN
+  INSERT INTO app.brands (tenant_id, name) VALUES (v_t, 'Marca de prueba')
+  RETURNING id INTO v_brand;
+
+  INSERT INTO app.products (tenant_id, brand_id, sku, name)
+  VALUES (v_t, v_brand, 'TEST-GAP', 'Producto de prueba')
+  RETURNING id INTO v_product;
+
+  INSERT INTO app.product_variants (tenant_id, product_id, sku, variant_name)
+  VALUES (v_t, v_product, 'TEST-GAP-1', 'Variante de prueba')
+  RETURNING id INTO v_variant;
+
+  INSERT INTO app.warehouses (tenant_id, code, name)
+  VALUES (v_t, 'WH-GAP', 'Deposito de prueba')
+  RETURNING id INTO v_wh;
+
+  INSERT INTO app.stock_movements (
+    id, tenant_id, variant_id, warehouse_id, kind, quantity, unit_cost, reason
+  ) VALUES (
+    v_mov, v_t, v_variant, v_wh, 'sale_out', 1, 1234.00,
+    'Movimiento de prueba sin asiento (invariante 14)'
+  );
+
+  SELECT count(*) INTO v_found
+    FROM accounting.v_posting_gaps g
+   WHERE g.tenant_id = v_t
+     AND g.source_type = 'stock_movement'
+     AND g.source_id = v_mov;
+
+  IF v_found <> 1 THEN
+    RAISE EXCEPTION
+      'La vista de brechas NO delato el hecho sin asiento (encontrados: %). '
+      'Una vista que no encuentra lo que busca no controla nada.', v_found;
+  END IF;
+END $$;
+`
+    )
+  );
+
+  assert(
+    gap.ok,
+    'un movimiento de stock valuado sin asiento es DELATADO por la vista de brechas',
+    gap.err
+  );
+
+  // Y una vez generado el asiento, la brecha desaparece. Sin esto, la vista
+  // podría delatar todo siempre y la prueba anterior pasaría igual.
+  const cierre = await trySql(
+    withTenant(
+      TENANT_A,
+      `
+DO $$
+DECLARE
+  v_t uuid := '${TENANT_A}';
+  v_mov uuid := '${GAP_SOURCE}';
+  v_restante integer;
+BEGIN
+  PERFORM accounting.post_entry_for_source(
+    v_t, 'stock_movement', v_mov, 'sale_out', CURRENT_DATE,
+    'Costo de la mercaderia vendida (prueba invariante 14)',
+    '{"cost_amount": 1234.00}'::jsonb
+  );
+
+  SELECT count(*) INTO v_restante
+    FROM accounting.v_posting_gaps g
+   WHERE g.tenant_id = v_t AND g.source_id = v_mov;
+
+  IF v_restante <> 0 THEN
+    RAISE EXCEPTION 'La brecha sigue abierta tras generar el asiento (%).', v_restante;
+  END IF;
+END $$;
+`
+    )
+  );
+
+  assert(
+    cierre.ok,
+    'generado el asiento, la brecha se cierra (la vista no delata en falso)',
+    cierre.err
+  );
 
   // La vista tiene que estar declarada con security_invoker: sin eso, la vista
   // corre con los privilegios del dueño y saltea el RLS de las tablas de abajo,
@@ -1138,10 +1312,16 @@ FROM pg_class c WHERE c.oid = 'accounting.v_posting_gaps'::regclass;
     `security_invoker=${invoker}`
   );
 
-  if (VERBOSE) {
-    console.log(`      fuentes: ${fuentes || '(ninguna vista la referencia)'}`);
-    console.log(`      definición:\n${definicion.split('\n').slice(0, 12).join('\n')}`);
-  }
+  // Y el aislamiento: la empresa B no puede ver la brecha de A.
+  const desdeB = await sql(
+    withTenant(TENANT_B, `SELECT count(*)::text FROM accounting.v_posting_gaps;`)
+  );
+
+  assert(
+    desdeB === '0',
+    'la empresa B no ve ninguna brecha de A (aislamiento de la vista)',
+    `B ve ${desdeB} brecha(s) que no son suyas.`
+  );
 }
 
 // =============================================================================
