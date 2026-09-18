@@ -50,6 +50,11 @@
  *     --dsn "postgres://app_login:...@localhost:5432/control" \
  *     --admin-dsn "postgres://postgres:...@localhost:5432/control" --verbose
  *
+ * Los DOS DSN son obligatorios. Las invariantes corren como rol de aplicación
+ * (la única forma de que el aislamiento se pruebe de verdad), y la preparación y
+ * limpieza del escenario como rol de plataforma: `app.stock_movements` es
+ * append-only y `control_app` no tiene DELETE sobre ella.
+ *
  * Requiere `psql` en el PATH (o `PG_BIN` apuntando a su carpeta).
  * Salida: 0 si todo pasa · 1 si una garantía no se cumple · 2 si el entorno no sirve.
  * =============================================================================
@@ -95,7 +100,33 @@ function parseArgs() {
     );
     process.exit(2);
   }
-  if (!out.adminDsn) out.adminDsn = out.dsn;
+  // El DSN administrativo NO cae al de aplicación.
+  //
+  // Antes caía, y eso convertía un error de invocación en una falla confusa: la
+  // preparación del escenario intentaba borrar `app.stock_movements` con el rol
+  // `app_login`, que tiene SELECT e INSERT pero **no DELETE** (los movimientos de
+  // stock son append-only a propósito), y la suite moría con «permiso denegado a
+  // la tabla stock_movements» antes de correr una sola invariante. El mensaje
+  // apuntaba a un problema de permisos del esquema cuando el problema real era
+  // que faltaba `--admin-dsn`.
+  //
+  // La suite de aislamiento ya documenta el criterio correcto: preparar y limpiar
+  // el escenario es una operación de PLATAFORMA. Acá se vuelve obligatorio en vez
+  // de advertirlo, porque la limpieza necesita privilegios que la aplicación no
+  // tiene por diseño — y un rol que no puede limpiar deja el escenario sucio
+  // entre corridas, que es exactamente el fallo que la limpieza existe para evitar.
+  if (!out.adminDsn) {
+    console.error(
+      '\nFalta el DSN administrativo (`--admin-dsn`).\n\n' +
+        'La preparación y la limpieza del escenario corren con el rol de plataforma.\n' +
+        'El rol de aplicación no puede hacerlas: `app.stock_movements` es append-only\n' +
+        'y `control_app` no tiene DELETE sobre ella.\n\n' +
+        '  node tests/accounting/run.mjs \\\n' +
+        '    --dsn "postgres://app_login:...@host:5432/control" \\\n' +
+        '    --admin-dsn "postgres://postgres:...@host:5432/control"\n'
+    );
+    process.exit(2);
+  }
   return out;
 }
 

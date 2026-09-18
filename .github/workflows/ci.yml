@@ -278,7 +278,11 @@ jobs:
             "CREATE ROLE app_login LOGIN PASSWORD 'AppL0gin!' NOBYPASSRLS IN ROLE control_app;"
 
       - name: Ejecutar invariantes contables
-        run: node tests/accounting/run.mjs --verbose
+        run: |
+          node tests/accounting/run.mjs \
+            --dsn "$DATABASE_URL" \
+            --admin-dsn "$ADMIN_DATABASE_URL" \
+            --verbose
 
   # ---------------------------------------------------------------------------
   # 4 · TypeScript de la API.
