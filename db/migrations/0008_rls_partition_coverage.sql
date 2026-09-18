@@ -164,8 +164,29 @@ DECLARE
   r          record;
   v_missing  text[] := ARRAY[]::text[];
   v_reason   text;
+  v_schemas  text[];
 BEGIN
-  -- Tablas exentas por diseño: identidad global y catálogos del sistema.
+  -- Los esquemas NO se enumeran a mano. Si alguien agrega un esquema nuevo con
+  -- datos de inquilinos, una lista fija lo dejaría afuera en silencio — el mismo
+  -- tipo de agujero que esta aserción existe para prevenir. Se excluyen sólo los
+  -- esquemas internos de PostgreSQL y los de extensión.
+  SELECT array_agg(n.nspname ORDER BY n.nspname)
+  INTO v_schemas
+  FROM pg_namespace n
+  WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'public')
+    AND n.nspname NOT LIKE 'pg_temp%'
+    AND n.nspname NOT LIKE 'pg_toast_temp%'
+    -- Esquemas que pertenecen a extensiones instaladas, no al proyecto.
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_depend d
+      JOIN pg_extension e ON e.oid = d.objid
+      WHERE d.objid = n.oid AND d.deptype = 'e'
+    );
+
+  -- ---------------------------------------------------------------------------
+  -- A · Tablas y tablas particionadas (el padre), en todos los esquemas del
+  --     proyecto.
+  -- ---------------------------------------------------------------------------
   FOR r IN
     SELECT n.nspname AS schema_name, c.relname AS table_name, c.relrowsecurity,
            c.relforcerowsecurity,
@@ -178,8 +199,8 @@ BEGIN
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relkind IN ('r', 'p')
-      AND n.nspname IN ('app', 'billing', 'logistics', 'audit')
-      AND NOT c.relispartition          -- las particiones se validan abajo
+      AND n.nspname = ANY (v_schemas)
+      AND NOT c.relispartition          -- las particiones se validan aparte
   LOOP
     -- a) FORCE RLS obligatorio en toda tabla con tenant_id.
     IF r.has_tenant_id AND NOT r.relforcerowsecurity THEN
@@ -204,6 +225,12 @@ BEGIN
         v_reason := 'catálogo global / identidad federada';
       END IF;
 
+      -- `ops` es infraestructura de plataforma: jobs e historial de ejecuciones.
+      -- No contiene datos de ningún inquilino, así que no lleva tenant_id.
+      IF r.schema_name = 'ops' THEN
+        v_reason := 'infraestructura de plataforma, sin datos de inquilinos';
+      END IF;
+
       IF v_reason IS NULL AND r.policy_count = 0 THEN
         v_missing := v_missing ||
           format('%I.%I: sin tenant_id y sin política (exención no declarada)',
@@ -212,15 +239,17 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- d) Cada partición debe tener su propia cobertura. Este es el chequeo que
-  --    habría detectado el defecto original de audit.events.
+  -- ---------------------------------------------------------------------------
+  -- B · Cada partición debe tener su propia cobertura. Este es el chequeo que
+  --     habría detectado el defecto original de audit.events.
+  -- ---------------------------------------------------------------------------
   FOR r IN
     SELECT n.nspname AS schema_name, c.relname AS table_name, c.relforcerowsecurity,
            (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid) AS policy_count
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relispartition
-      AND n.nspname IN ('app', 'billing', 'logistics', 'audit')
+      AND n.nspname = ANY (v_schemas)
   LOOP
     IF NOT r.relforcerowsecurity OR r.policy_count = 0 THEN
       v_missing := v_missing ||

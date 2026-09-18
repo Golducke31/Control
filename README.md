@@ -432,14 +432,42 @@ Recorre el catálogo real y lanza excepción si alguna tabla o partición de neg
 
 `audit.v_default_partition_usage` expone cuántas filas cayeron en la partición `DEFAULT`. Cualquier valor mayor a cero significa que el job de mantenimiento se detuvo y los datos están entrando a un cajón sin política propia. Es una alerta temprana, no un reporte.
 
-### 3.7 Rendimiento
+### 3.7 Tareas programadas: el ledger y por qué existe
+
+Un job que existe y no corre es peor que un job ausente: da la apariencia de estar cubierto. Por eso el mantenimiento de particiones (`0009`) y la alerta de vencimiento de certificados no se apoyan en un log de aplicación, sino en un **ledger en la base** (`ops.jobs`, `ops.job_runs`, migración `0010`).
+
+La pregunta que el ledger responde con una consulta es la que importa: *¿cuándo corrió esto por última vez, y está atrasado?*
+
+```sql
+SELECT code, is_overdue, last_success_at, is_running FROM ops.v_job_health;
+```
+
+**Jobs registrados:**
+
+| Job | Cadencia | Crítico | Qué hace |
+|---|---|---|---|
+| `partition.maintenance` | mensual | sí | Crea las particiones de los próximos 3 meses y verifica la cobertura RLS al final. |
+| `partition.retention` | mensual | no | Purga particiones GPS fuera de la ventana de 6 meses. Nunca toca `audit.events`. |
+| `certificate.expiry` | diaria | sí | Alerta a 45, 30 y 15 días del vencimiento del certificado AFIP de cada empresa. |
+| `stock.reconciliation` | diaria | sí | Compara `stock_levels` contra la suma de `stock_movements`. |
+| `outbox.reaper` | cada 15 min | sí | Marca ejecuciones colgadas y trabajos AFIP muertos. |
+
+**Tres decisiones que hacen que el ledger sea confiable:**
+
+1. **El índice único `uq_job_runs_one_running`** impide dos ejecuciones simultáneas del mismo job, en cualquier instancia. Es una garantía del motor, no una convención del runner: aunque el código olvide tomar un lock, la segunda inserción falla.
+2. **`begin_job_run()` devuelve `NULL`** en vez de lanzar cuando ya hay una ejecución viva. La segunda instancia **saltea**, que es lo correcto: no es un error, es el sistema funcionando.
+3. **El cierre va en un `finally`.** Si el job explota, la fila queda cerrada como fallida. Sin eso, un crash deja la ejecución en `running` para siempre y el índice único bloquea todas las corridas siguientes — el job quedaría muerto en silencio. `ops.reap_stuck_job_runs()` destraba el caso residual.
+
+**El modo de falla más traicionero, y la guarda contra él.** Los jobs transversales (certificados, reaper) corren con `app.platform_admin = 'on'` porque necesitan ver datos de todos los inquilinos. Sin ese contexto, la política RLS de `billing.afip_credentials` devuelve **cero filas**: el job reportaría "sin certificados por vencer" para siempre, con estado `succeeded`. `JobRunner.assertPlatformMode()` verifica al arrancar que el modo plataforma realmente se aplica, para que esa falla aparezca al iniciar el worker y no a las tres de la mañana con una alerta que nunca llega.
+
+### 3.8 Rendimiento
 
 - **Índices con `tenant_id` como primera columna.** `(tenant_id, created_at DESC)`. El planificador descarta el `tenant_id` en el filtro de índice y usa las siguientes columnas para ordenar, evitando un sort.
 - **Índices parciales** para las consultas calientes: `WHERE status IN ('draft','queued')` sobre `invoices`, `WHERE available <= 0` sobre `stock_levels`.
 - **Particionado** por rango mensual en `position_pings` (~2-5 M filas/mes en una flota mediana) y `audit.events`.
 - **Filtro de fila temprano:** con RLS, PostgreSQL agrega el predicado de la política al plan. Si hay un índice sobre `tenant_id`, el costo por consulta es prácticamente el de un inquilino único.
 
-### 3.8 Consistencia de stock
+### 3.9 Consistencia de stock
 
 El stock no se actualiza desde la aplicación: se pasa por una única función con lógica transaccional.
 
@@ -980,12 +1008,16 @@ Control/
 │   │   ├── 0006_rls_policies.sql              # ★ Políticas RLS de aislamiento
 │   │   ├── 0007_hardening_and_audit.sql       # Roles, grants, auditoría, lógica de stock
 │   │   ├── 0008_rls_partition_coverage.sql    # ★ RLS en particiones + aserción de cobertura
-│   │   └── 0009_partition_maintenance.sql     # Creación de particiones con RLS heredado
+│   │   ├── 0009_partition_maintenance.sql     # Creación de particiones con RLS heredado
+│   │   ├── 0010_job_ledger.sql                # Ledger de tareas programadas
+│   │   └── 0011_job_runner_grants.sql         # Permisos del runner de jobs
 │   └── seed/
 │       └── 0001_system_catalog.sql            # Permisos, roles de sistema, plantillas
 ├── apps/
 │   └── api/
 │       └── src/
+│           ├── jobs/
+│           │   └── job-runner.ts              # ★ Runner con ledger, modo plataforma
 │           ├── modules/
 │           │   ├── tenancy/
 │           │   │   └── tenant-context.service.ts   # ★ Contexto, middleware, guards
@@ -1020,6 +1052,8 @@ Control/
 | [`db/migrations/0007_hardening_and_audit.sql`](db/migrations/0007_hardening_and_audit.sql) | Roles de DB, `set_tenant_context`, auditoría con hash chain, `apply_stock_movement`. |
 | [`db/migrations/0008_rls_partition_coverage.sql`](db/migrations/0008_rls_partition_coverage.sql) | RLS en particiones (`apply_partition_rls`) y `assert_rls_coverage()`. |
 | [`db/migrations/0009_partition_maintenance.sql`](db/migrations/0009_partition_maintenance.sql) | `ensure_month_partition()`: crear particiones sin perder el aislamiento. |
+| [`db/migrations/0010_job_ledger.sql`](db/migrations/0010_job_ledger.sql) | Ledger de jobs, `begin_job_run`, `finish_job_run`, `v_job_health`. |
+| [`apps/api/src/jobs/job-runner.ts`](apps/api/src/jobs/job-runner.ts) | Runner con ledger, cierre garantizado y verificación de modo plataforma. |
 | [`apps/api/src/modules/tenancy/tenant-context.service.ts`](apps/api/src/modules/tenancy/tenant-context.service.ts) | `withTenant()`, middleware HTTP, guard de permisos. |
 | [`apps/api/src/modules/afip/wsaa.client.ts`](apps/api/src/modules/afip/wsaa.client.ts) | TRA, firma CMS, login, cache y lock del TA. |
 | [`apps/api/src/modules/afip/wsfe.client.ts`](apps/api/src/modules/afip/wsfe.client.ts) | Catálogos AFIP, armado del request, emisión, recuperación. |
@@ -1143,12 +1177,14 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Definición de rutas HTTP.** Los servicios están implementados con sus dependencias inyectadas; resta el cableado de los handlers de Fastify.
 - **Tests de integración** contra AFIP homologación con un CUIT de prueba.
 - **Frontend de producción.** El prototipo valida el diseño; falta la implementación en Next.js con componentes reutilizables.
-- **Reconciliación de stock.** Se define la estructura del libro mayor; falta el job que detecta y reporta discrepancias entre `stock_levels` y la suma de `stock_movements`.
-- **Job de mantenimiento de particiones.** `app.ensure_partitions_ahead()` está implementada y probada, pero falta el scheduler que la invoque mensualmente y la alerta sobre `audit.v_default_partition_usage`.
+- **Reconciliación de stock.** Se define la estructura del libro mayor; falta el job que detecta y reporta discrepancias entre `stock_levels` y la suma de `stock_movements`. El job está declarado en el ledger (`stock.reconciliation`), resta su implementación.
+- **Scheduler de infraestructura.** El ledger y el runner están implementados; falta el disparador externo (Kubernetes CronJob o el servicio gestionado que se elija) que invoque cada job según `JOB_SCHEDULE`. Mientras tanto, los jobs se pueden ejecutar a mano y quedan registrados igual.
+- **Alertas de jobs atrasados.** `ops.v_job_health` expone `is_overdue`, pero falta conectar esa vista al sistema de alertas.
 
 ### Resuelto en esta entrega
 
 - **Aislamiento RLS en tablas particionadas.** Las políticas declaradas sólo sobre el padre no alcanzaban a las particiones. Corregido en `0008`, con la barrera `assert_rls_coverage()` que falla el build ante cualquier tabla nueva sin política, y `0009` para que las particiones futuras nazcan protegidas. Ver [§3.5](#35-tablas-particionadas-las-políticas-no-se-heredan).
+- **Mantenimiento de particiones y alerta de certificados sin invocación.** `0010` e `0011` crean el ledger de jobs y sus permisos; `job-runner.ts` los ejecuta con garantía de cierre. Ver [§3.7](#37-tareas-programadas-el-ledger-y-por-qué-existe).
 
 ---
 

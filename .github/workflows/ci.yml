@@ -62,6 +62,17 @@ jobs:
       - name: Verificar que la aserción de cobertura pasa
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT app.assert_rls_coverage();"
 
+      - name: Verificar el ledger de jobs
+        run: |
+          set -euo pipefail
+          JOBS=$(psql "$DATABASE_URL" -t -A -c "SELECT count(*) FROM ops.jobs WHERE is_active;")
+          echo "jobs activos: $JOBS"
+          if [ "$JOBS" -lt 4 ]; then
+            echo "::error::El catálogo de jobs quedó vacío o incompleto"
+            exit 1
+          fi
+          psql "$DATABASE_URL" -t -A -c "SELECT code, is_overdue FROM ops.v_job_health;"
+
   # ---------------------------------------------------------------------------
   # 2 · Lint de cobertura RLS. Rápido, sin datos: detecta la tabla nueva sin
   #     política antes de que llegue a revisión humana.

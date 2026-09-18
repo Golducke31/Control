@@ -14,6 +14,22 @@
 
 \pset pager off
 
+-- Los esquemas se descubren, no se enumeran: la versión SQL de la aserción debe
+-- fallar por el mismo motivo que `app.assert_rls_coverage()`. Si acá hubiera una
+-- lista fija y allá descubrimiento, un esquema nuevo daría resultados distintos
+-- según cuál de los dos controles se mire.
+CREATE TEMP VIEW _project_schemas AS
+SELECT n.nspname
+FROM pg_namespace n
+WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'public')
+  AND n.nspname NOT LIKE 'pg_temp%'
+  AND n.nspname NOT LIKE 'pg_toast_temp%'
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_depend d
+    JOIN pg_extension e ON e.oid = d.objid
+    WHERE d.objid = n.oid AND d.deptype = 'e'
+  );
+
 WITH business_tables AS (
   SELECT
     n.nspname                                   AS schema_name,
@@ -33,7 +49,7 @@ WITH business_tables AS (
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE c.relkind IN ('r', 'p')
-    AND n.nspname IN ('app', 'billing', 'logistics', 'audit')
+    AND n.nspname IN (SELECT nspname FROM _project_schemas)
 ),
 violations AS (
   -- 1. Tabla con tenant_id sin FORCE RLS.
@@ -59,9 +75,21 @@ violations AS (
   FROM pg_policy p
   JOIN pg_class c ON c.oid = p.polrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname IN ('app', 'billing', 'logistics', 'audit')
+  WHERE n.nspname IN (SELECT nspname FROM _project_schemas)
     AND p.polpermissive
     AND pg_get_expr(p.polqual, p.polrelid) = 'true'
+
+  UNION ALL
+
+  -- 4. Tabla sin tenant_id y sin política, en un esquema que no está declarado
+  --    como exento. Detecta el esquema nuevo con datos de inquilinos.
+  SELECT schema_name, table_name, is_partition,
+         'sin tenant_id y sin politica (exencion no declarada)'
+  FROM business_tables
+  WHERE NOT has_tenant_id
+    AND policy_count = 0
+    AND NOT (schema_name = 'app' AND table_name IN ('users', 'permissions', 'ui_templates'))
+    AND schema_name <> 'ops'
 )
 SELECT
   schema_name,

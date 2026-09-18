@@ -485,6 +485,146 @@ async function testAssertionExists() {
 }
 
 // =============================================================================
+// F · Ledger de jobs: invariantes de concurrencia y de exención de tenant
+// =============================================================================
+async function testJobLedger() {
+  console.log('\n\u25b6 F · Ledger de jobs programados');
+
+  // F.1 · El ledger existe. Sin él, "el job corrió" no es verificable.
+  const tables = await sql(`
+SELECT count(*) FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'ops' AND c.relname IN ('jobs', 'job_runs') AND c.relkind = 'r';
+`);
+
+  assert(
+    Number(tables) === 2,
+    'ops.jobs y ops.job_runs existen',
+    'El ledger es lo que permite responder "¿cuándo corrió esto por última vez?".'
+  );
+
+  if (Number(tables) !== 2) return;
+
+  // F.2 · El catálogo tiene los jobs declarados. Un ledger vacío es
+  //       indistinguible de "nunca corrió nada".
+  const jobs = await sql(`SELECT count(*) FROM ops.jobs WHERE is_active;`);
+  assert(
+    Number(jobs) >= 4,
+    `ops.jobs tiene los jobs esperados (${jobs})`,
+    'Un catálogo vacío haría que la vista de salud no reporte nada.'
+  );
+
+  // F.3 · ops NO debe tener tenant_id. Es infraestructura de plataforma, y la
+  //       aserción de cobertura lo exime por nombre. Si alguien le agregara
+  //       tenant_id, la exención quedaría mal y el aislamiento sin cubrir.
+  const tenantCol = await sql(`
+SELECT count(*) FROM pg_attribute a
+JOIN pg_class c ON c.oid = a.attrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'ops' AND a.attname = 'tenant_id'
+  AND a.attnum > 0 AND NOT a.attisdropped;
+`);
+
+  assert(
+    Number(tenantCol) === 0,
+    'ops no tiene columna tenant_id (infraestructura, no dato de negocio)',
+    'Si ops tuviera tenant_id, la exención en assert_rls_coverage() sería incorrecta.'
+  );
+
+  // F.4 · El índice único que impide dos ejecuciones simultáneas del mismo job.
+  const uniq = await sql(`
+SELECT count(*) FROM pg_indexes
+WHERE schemaname = 'ops' AND indexname = 'uq_job_runs_one_running';
+`);
+
+  assert(
+    Number(uniq) === 1,
+    'existe el índice único de una sola ejecución por job',
+    'Sin este índice, dos réplicas podrían correr el mismo job a la vez.'
+  );
+
+  // F.5 · El invariante se cumple de verdad: insertar dos ejecuciones vivas del
+  //       mismo job debe fallar en la segunda.
+  const dup = await trySql(`
+BEGIN;
+INSERT INTO ops.job_runs (job_code, status) VALUES ('partition.maintenance', 'running');
+INSERT INTO ops.job_runs (job_code, status) VALUES ('partition.maintenance', 'running');
+COMMIT;
+`);
+
+  assert(
+    !dup.ok,
+    'dos ejecuciones simultáneas del mismo job son rechazadas por el motor',
+    dup.ok ? 'El índice único no está funcionando.' : ''
+  );
+
+  // Limpiar la fila que quedó de la prueba.
+  await sql(`DELETE FROM ops.job_runs WHERE job_code = 'partition.maintenance' AND status = 'running';`);
+
+  // F.6 · begin_job_run devuelve NULL cuando ya hay una ejecución en curso, en
+  //       vez de lanzar. Es lo que permite que la segunda instancia saltee.
+  await sql(`
+BEGIN;
+SELECT ops.begin_job_run('partition.maintenance', 'test-host-1');
+COMMIT;
+`);
+
+  // Se consulta en una transacción propia y se cierra explícitamente: dejar un
+  // BEGIN sin COMMIT abortaría la sesión de psql en el siguiente statement.
+  const second = await sql(`
+BEGIN;
+SELECT COALESCE(ops.begin_job_run('partition.maintenance', 'test-host-2')::text, 'NULL') AS r;
+ROLLBACK;
+`);
+
+  assert(
+    second === 'NULL' || second === '',
+    'begin_job_run devuelve NULL si ya hay una ejecución en curso',
+    `Devolvió "${second}". La segunda instancia debe saltear, no fallar.`
+  );
+
+  await sql(`DELETE FROM ops.job_runs WHERE job_code = 'partition.maintenance';`);
+
+  // F.7 · La vista de salud responde. Es la consulta que consume el monitoreo.
+  const health = await trySql('SELECT code, is_overdue FROM ops.v_job_health;');
+  assert(
+    health.ok,
+    'ops.v_job_health es consultable',
+    health.err || ''
+  );
+
+  // F.8 · Cerrar una ejecución es idempotente: no debe resucitar ni fallar.
+  await sql(`
+BEGIN;
+INSERT INTO ops.job_runs (job_code, status) VALUES ('partition.retention', 'running');
+COMMIT;
+`);
+
+  const closed = await sql(`
+BEGIN;
+SELECT ops.finish_job_run(id, true, '{}'::jsonb, NULL) FROM ops.job_runs
+WHERE job_code = 'partition.retention' AND status = 'running';
+COMMIT;
+`);
+
+  const closedAgain = await trySql(`
+BEGIN;
+SELECT ops.finish_job_run(id, true, '{}'::jsonb, NULL) FROM ops.job_runs
+WHERE job_code = 'partition.retention';
+COMMIT;
+`);
+
+  assert(
+    closedAgain.ok,
+    'finish_job_run es idempotente (cerrar dos veces no falla)',
+    closedAgain.err || ''
+  );
+
+  await sql(`DELETE FROM ops.job_runs WHERE job_code = 'partition.retention';`);
+  void closed;
+}
+
+// =============================================================================
 // Ejecución
 // =============================================================================
 async function main() {
@@ -515,6 +655,7 @@ async function main() {
   await testWriteIsolation(tables);
   await testFailClosed(tables);
   await testAssertionExists();
+  await testJobLedger();
 
   console.log('\n' + '='.repeat(70));
   if (failures.length === 0) {
