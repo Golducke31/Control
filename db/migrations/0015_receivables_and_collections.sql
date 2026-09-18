@@ -92,13 +92,129 @@ ALTER TABLE billing.invoices
   ADD COLUMN IF NOT EXISTS due_date        date,
   ADD COLUMN IF NOT EXISTS payment_status  text;
 
+-- -----------------------------------------------------------------------------
+-- 0.b · La inmutabilidad fiscal no puede impedir el cobro
+-- -----------------------------------------------------------------------------
+-- DEFECTO CORREGIDO ACÁ (encontrado por la suite de E4, no en producción).
+--
+-- `0006` declara:
+--
+--     CREATE POLICY invoices_no_update_authorized ON billing.invoices
+--       AS RESTRICTIVE FOR UPDATE TO PUBLIC
+--       USING (status <> 'authorized');
+--
+-- La intención es correcta: un comprobante autorizado por AFIP es un documento
+-- fiscal y no se edita. La implementación es demasiado amplia, porque `FOR UPDATE`
+-- y todo `UPDATE` de una fila `authorized` quedan bloqueados — y esta migración
+-- necesita exactamente eso para acumular `paid_total`. El resultado eran dos fallas
+-- silenciosas, ninguna con un mensaje que apuntara al problema:
+--
+--   1. `SELECT ... FOR UPDATE` sobre una factura autorizada devolvía `NOT FOUND`,
+--      así que `apply_customer_collection` abortaba con "La factura <uuid> no
+--      existe en esta empresa" señalando una factura que estaba ahí, a la vista,
+--      y con el cliente y el importe correctos. La conclusión natural —"el id está
+--      mal"— es falsa. Peor: sin `FOR UPDATE` la misma consulta encuentra la fila,
+--      así que el síntoma depende de una cláusula que no tiene nada que ver con la
+--      visibilidad.
+--
+--   2. El `UPDATE billing.invoices SET paid_total = ...` que sigue a la imputación
+--      afectaba 0 filas SIN error. Una cobranza que no cobra y no avisa. Es el
+--      peor modo de falla posible: el cobro se registra, la imputación se inserta,
+--      y el saldo del cliente nunca baja.
+--
+-- El problema de fondo es que la política confunde dos cosas distintas bajo la
+-- misma condición: la INMUTABILIDAD FISCAL (identidad del comprobante, importes,
+-- CAE, fechas) y los ACUMULADORES DE COBRO (`paid_total`, `credited_total`,
+-- `withheld_total`, `payment_status`). Los segundos son, por definición, el
+-- resultado de hechos POSTERIORES a la emisión: una factura autorizada que se cobra
+-- tiene que registrar que se cobró.
+--
+-- LA CORRECCIÓN: la política deja pasar el `UPDATE` y la inmutabilidad fiscal se
+-- sostiene con un TRIGGER, que es el único lugar donde `OLD` y `NEW` conviven y
+-- por lo tanto el único que puede decidir si el CAMBIO es admisible.
+--
+-- POR QUÉ NO SE RESUELVE CON LA POLÍTICA SOLA: una política evalúa `USING` (la fila
+-- vieja) y `WITH CHECK` (la fila nueva) por separado. No puede comparar una contra
+-- la otra, así que no puede expresar "todo igual salvo los acumuladores". El intento
+-- de escribir esa condición dentro del `WITH CHECK` es una ilusión: compara la fila
+-- nueva consigo misma y siempre da verdadero.
+--
+-- POR QUÉ NO ALCANZA CON DEJAR LA POLÍTICA PERMISIVA Y NADA MÁS: porque entonces
+-- `UPDATE billing.invoices SET total = 1 WHERE status = 'authorized'` pasaría. La
+-- promesa de `0006` —un comprobante autorizado no se edita— tiene que seguir
+-- cumpliéndose; lo que cambia es que ahora se cumple con precisión.
+DROP POLICY IF EXISTS invoices_no_update_authorized ON billing.invoices;
+CREATE POLICY invoices_update_settlement ON billing.invoices
+  AS RESTRICTIVE
+  FOR UPDATE TO PUBLIC
+  USING (true)
+  WITH CHECK (true);
+
+COMMENT ON POLICY invoices_update_settlement ON billing.invoices IS
+  'Reemplaza a invoices_no_update_authorized de 0006, que bloqueaba TODO UPDATE sobre una factura autorizada —incluido el de los acumuladores de cobro— y hacía que un cobro se registrara sin que el saldo del cliente bajara. La inmutabilidad fiscal la impone el trigger assert_invoice_immutable, que sí puede comparar la fila vieja con la nueva.';
+
+-- El trigger es la defensa real: `OLD` y `NEW` a la vez, campo por campo.
+CREATE OR REPLACE FUNCTION billing.assert_invoice_immutable()
+RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  -- Sólo aplica a comprobantes ya autorizados: un borrador se corrige sin trámite.
+  IF OLD.status <> 'authorized' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Los acumuladores de cobro y su estado derivado son lo ÚNICO que puede cambiar.
+  -- Se listan por nombre y se comparan una por una: una lista corta y explícita se
+  -- revisa; una condición genérica ("¿cambió algo que no sea esto?") se olvida.
+  IF  NEW.id             IS DISTINCT FROM OLD.id
+   OR NEW.tenant_id      IS DISTINCT FROM OLD.tenant_id
+   OR NEW.kind           IS DISTINCT FROM OLD.kind
+   OR NEW.doc_type       IS DISTINCT FROM OLD.doc_type
+   OR NEW.point_of_sale  IS DISTINCT FROM OLD.point_of_sale
+   OR NEW.number         IS DISTINCT FROM OLD.number
+   OR NEW.issue_date     IS DISTINCT FROM OLD.issue_date
+   OR NEW.customer_id    IS DISTINCT FROM OLD.customer_id
+   OR NEW.subtotal       IS DISTINCT FROM OLD.subtotal
+   OR NEW.discount_total IS DISTINCT FROM OLD.discount_total
+   OR NEW.tax_total      IS DISTINCT FROM OLD.tax_total
+   OR NEW.total          IS DISTINCT FROM OLD.total
+   OR NEW.currency       IS DISTINCT FROM OLD.currency
+   OR NEW.fx_rate        IS DISTINCT FROM OLD.fx_rate
+   OR NEW.cae            IS DISTINCT FROM OLD.cae
+   OR NEW.cae_expires_at IS DISTINCT FROM OLD.cae_expires_at
+   OR NEW.result         IS DISTINCT FROM OLD.result
+   OR NEW.related_invoice_id    IS DISTINCT FROM OLD.related_invoice_id
+   OR NEW.receptor_doc_type     IS DISTINCT FROM OLD.receptor_doc_type
+   OR NEW.receptor_doc_number   IS DISTINCT FROM OLD.receptor_doc_number
+   OR NEW.receptor_name         IS DISTINCT FROM OLD.receptor_name
+   OR NEW.receptor_tax_condition IS DISTINCT FROM OLD.receptor_tax_condition
+   OR NEW.idempotency_key       IS DISTINCT FROM OLD.idempotency_key
+  THEN
+    RAISE EXCEPTION
+      'El comprobante % % está autorizado y es fiscalmente inmutable: sólo se '
+      'anula con Nota de Crédito. Se intentó modificar un campo que no es un '
+      'acumulador de cobro.',
+      OLD.doc_type, OLD.number
+      USING ERRCODE = '42501';
+  END IF;
+
+  RETURN NEW;
+END $$;
+
+COMMENT ON FUNCTION billing.assert_invoice_immutable IS
+  'Impide modificar cualquier campo fiscal de un comprobante autorizado; sólo admite los acumuladores de cobro (paid_total, credited_total, withheld_total, payment_status, due_date). Es la defensa real de la inmutabilidad: una política ve la fila vieja o la nueva, nunca las dos, y no puede compararlas.';
+
+DROP TRIGGER IF EXISTS assert_invoice_immutable ON billing.invoices;
+CREATE TRIGGER assert_invoice_immutable
+  BEFORE UPDATE ON billing.invoices
+  FOR EACH ROW EXECUTE FUNCTION billing.assert_invoice_immutable();
+
 -- El estado de cobro se DERIVA. Un estado escrito a mano sobre una factura que
 -- después recibe una nota de crédito queda mintiendo, y nadie lo recalcula.
 -- Misma lógica que el estado de línea en `0014`: la columna existe para poder
 -- indexar y filtrar, pero su valor no lo elige nadie.
 --
 -- POR QUÉ UN TRIGGER Y NO UN DEFAULT
---
 -- El primer intento fue `DEFAULT billing.derive_payment_status(...)`. No funciona:
 -- un DEFAULT se evalúa con los valores POR DEFECTO de las demás columnas, no con
 -- los que trae el INSERT. Una factura insertada como `status='authorized'` recibía
@@ -545,7 +661,9 @@ END;
 $$;
 
 COMMENT ON FUNCTION billing.apply_customer_collection IS
-  'Imputa un cobro a una o varias facturas del cliente (T-1). Misma mecánica que purchasing.apply_supplier_payment: FOR UPDATE por factura, validación de saldo, suma íntegra y estado derivado.';
+  'Imputa un cobro a una o varias facturas del cliente (T-1). Misma mecánica que purchasing.apply_supplier_payment: FOR UPDATE por factura, validación de saldo, suma íntegra y estado derivado. '
+  'p_allocations es un array JSON de objetos con las claves «invoice_id» y «amount», en snake_case como las columnas que representan: '
+  '[{"invoice_id": "<uuid>", "amount": 100.00}, ...]. La suma de los montos debe igualar el total del cobro.';
 
 -- -----------------------------------------------------------------------------
 -- 5 · Aplicación de notas de crédito al saldo
@@ -696,7 +814,9 @@ END;
 $$;
 
 COMMENT ON FUNCTION billing.apply_credit_note IS
-  'Aplica una nota de crédito autorizada al saldo de una o varias facturas del mismo cliente (T-2). Impide aplicarla por encima de su importe o dos veces.';
+  'Aplica una nota de crédito autorizada al saldo de una o varias facturas del mismo cliente (T-2). Impide aplicarla por encima de su importe o dos veces. '
+  'p_applications es un array JSON de objetos con las claves «invoice_id» y «amount», en snake_case como las columnas que representan: '
+  '[{"invoice_id": "<uuid>", "amount": 100.00}, ...].';
 
 -- -----------------------------------------------------------------------------
 -- 6 · Configuración contable de cobros
@@ -708,10 +828,34 @@ CREATE OR REPLACE FUNCTION billing.seed_tenant_collections_config(p_tenant_id uu
 RETURNS integer
 LANGUAGE plpgsql SECURITY INVOKER AS $$
 DECLARE
-  v_roles  integer := 0;
-  v_reglas integer := 0;
-  v_faltan text;
+  v_cuentas integer := 0;
+  v_roles   integer := 0;
+  v_reglas  integer := 0;
+  v_faltan  text;
 BEGIN
+  IF p_tenant_id IS DISTINCT FROM app.current_tenant_id() AND NOT app.is_platform_admin() THEN
+    RAISE EXCEPTION 'Contexto de tenant inconsistente' USING ERRCODE = '42501';
+  END IF;
+
+  -- El plan de la empresa se copia si todavía no existe.
+  --
+  -- DEFECTO CORREGIDO. La primera versión de esta función resolvía los códigos
+  -- contra un plan que daba por existente y abortaba con "la empresa no tiene estas
+  -- cuentas en su plan" si faltaba. Eso la volvía inutilizable en el caso normal: una
+  -- empresa recién creada NO tiene plan, y el mensaje le decía al operador que cargue
+  -- la plantilla antes de configurar cobros —un paso que ninguna otra migración exige
+  -- y que la suite de tesorería destapó al intentar preparar su propio escenario.
+  --
+  -- `purchasing.seed_tenant_purchasing_config` (`0014`) ya resolvía esto copiando el
+  -- plan si faltaba, y era el único seed que lo hacía. Se replica el mismo criterio:
+  -- cada función de configuración tiene que poder arrancar de una empresa vacía, sin
+  -- depender de que alguien haya corrido otra antes. La copia se intenta sólo si la
+  -- empresa no tiene ninguna cuenta, porque la función de copia aborta —con razón—
+  -- si ya hay un plan cargado.
+  IF NOT EXISTS (SELECT 1 FROM accounting.accounts WHERE tenant_id = p_tenant_id) THEN
+    v_cuentas := accounting.seed_tenant_chart_of_accounts(p_tenant_id);
+  END IF;
+
   -- La contrapartida de un cobro es una cuenta de fondos: caja o banco. El rol
   -- `cash` lo siembra compras (`0014`), pero una empresa que sólo cobra y no
   -- compra nunca pasó por ahí. Se siembra acá también para que configurar cobros
@@ -774,7 +918,7 @@ BEGIN
 
   GET DIAGNOSTICS v_reglas = ROW_COUNT;
 
-  RETURN v_roles + v_reglas;
+  RETURN v_cuentas + v_roles + v_reglas;
 END;
 $$;
 
