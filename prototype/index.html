@@ -1,0 +1,2447 @@
+<!DOCTYPE html>
+<html lang="es-AR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control · Dashboard Multitenant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =========================================================================
+   Control · Design System · Glassmorphism
+   -------------------------------------------------------------------------
+   Los tokens de marca (--brand-*) son los que el tenant switcher reescribe en
+   runtime. Ningún componente consume un color hardcodeado: todo pasa por
+   tokens, y así el whitelabel funciona sin tocar el CSS.
+   ========================================================================= */
+:root {
+  /* --- Tokens de marca: los únicos que cambian por empresa --------------- */
+  --brand-primary:   #6D5EF8;
+  --brand-secondary: #22D3EE;
+  --brand-accent:    #F59E0B;
+  --brand-primary-rgb:   109, 94, 248;
+  --brand-secondary-rgb: 34, 211, 238;
+  --brand-accent-rgb:    245, 158, 11;
+  --brand-heading-font: 'Space Grotesk', system-ui, sans-serif;
+  --brand-body-font: 'Inter', system-ui, sans-serif;
+
+  /* --- Superficies: derivadas del fondo profundo ------------------------- */
+  --bg-base:      #070B18;
+  --bg-deep:      #0A0F22;
+  --glass-bg:        rgba(255, 255, 255, 0.045);
+  --glass-bg-hover:  rgba(255, 255, 255, 0.075);
+  --glass-bg-strong: rgba(255, 255, 255, 0.085);
+  --glass-border:      rgba(255, 255, 255, 0.09);
+  --glass-border-soft: rgba(255, 255, 255, 0.055);
+  --glass-highlight:   rgba(255, 255, 255, 0.14);
+
+  /* --- Texto ------------------------------------------------------------- */
+  --text-primary:   #EEF2FF;
+  --text-secondary: #9BA6C7;
+  --text-muted:     #6B7799;
+  --text-inverse:   #0A0F22;
+
+  /* --- Semánticos -------------------------------------------------------- */
+  --success: #34D399;
+  --warning: #FBBF24;
+  --danger:  #F87171;
+  --info:    #60A5FA;
+
+  /* --- Geometría --------------------------------------------------------- */
+  --radius-sm: 10px;
+  --radius:    16px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
+
+  /* --- Elevación --------------------------------------------------------- */
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.36), inset 0 1px 0 var(--glass-highlight);
+  --shadow-lift:  0 20px 48px rgba(0, 0, 0, 0.48), inset 0 1px 0 var(--glass-highlight);
+  --shadow-glow:  0 0 40px rgba(var(--brand-primary-rgb), 0.28);
+
+  /* --- Movimiento -------------------------------------------------------- */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 160ms;
+  --dur: 260ms;
+  --dur-slow: 420ms;
+
+  /* --- Layout ------------------------------------------------------------ */
+  --blur: 22px;
+  --sidebar-w: 264px;
+  --header-h: 68px;
+  --density: 1;
+}
+
+/* Densidad compacta: la plantilla 'distributor' y 'logistics' la activan */
+[data-density="compact"] { --density: 0.82; --blur: 18px; }
+[data-density="comfy"]   { --density: 1.14; }
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  min-height: 100%;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--brand-body-font);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Fondo con auroras de marca. Se animan muy lento: el movimiento constante
+   cansa la vista en jornadas largas, pero el reposo total se siente muerto. */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.55;
+}
+body::before {
+  width: 620px; height: 620px;
+  top: -180px; left: -140px;
+  background: radial-gradient(circle, rgba(var(--brand-primary-rgb), 0.55), transparent 68%);
+  animation: drift-a 34s ease-in-out infinite;
+}
+body::after {
+  width: 700px; height: 700px;
+  bottom: -240px; right: -180px;
+  background: radial-gradient(circle, rgba(var(--brand-secondary-rgb), 0.4), transparent 68%);
+  animation: drift-b 42s ease-in-out infinite;
+}
+@keyframes drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(90px, 60px) scale(1.14); }
+}
+@keyframes drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(-110px, -70px) scale(1.1); }
+}
+
+/* Respeta la preferencia del sistema: sin animaciones para quien las evita */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* =========================================================================
+   Primitiva: superficie glass
+   ========================================================================= */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur)) saturate(1.7);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.7);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-glass);
+  position: relative;
+  overflow: hidden;
+}
+/* Reflejo superior: le da el "canto de vidrio" que hace legible la superficie */
+.glass::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--glass-highlight) 22%, var(--glass-highlight) 78%, transparent);
+  pointer-events: none;
+}
+
+/* =========================================================================
+   Shell
+   ========================================================================= */
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+/* ------------------------------ Sidebar --------------------------------- */
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-right: 1px solid var(--glass-border-soft);
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
+  backdrop-filter: blur(28px) saturate(1.5);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  overflow-y: auto;
+  transition: width var(--dur) var(--ease);
+}
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 4px; }
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px;
+  border-radius: var(--radius);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border-soft);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  position: relative;
+}
+.brand-lockup:hover { background: var(--glass-bg-hover); border-color: var(--glass-border); }
+.brand-mark {
+  width: 38px; height: 38px;
+  border-radius: 11px;
+  flex: 0 0 38px;
+  display: grid;
+  place-items: center;
+  font-family: var(--brand-heading-font);
+  font-weight: 700;
+  font-size: 15px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+  box-shadow: 0 6px 18px rgba(var(--brand-primary-rgb), 0.4);
+  letter-spacing: -0.02em;
+}
+.brand-mark img { width: 100%; height: 100%; object-fit: contain; border-radius: 11px; }
+.brand-text { min-width: 0; flex: 1; }
+.brand-name {
+  font-family: var(--brand-heading-font);
+  font-weight: 600;
+  font-size: 13.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brand-meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chevron {
+  color: var(--text-muted);
+  transition: transform var(--dur) var(--ease);
+  flex: 0 0 auto;
+}
+.brand-lockup[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+
+/* Menú de empresas */
+.tenant-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0; right: 0;
+  padding: 7px;
+  border-radius: var(--radius);
+  background: rgba(14, 20, 42, 0.94);
+  backdrop-filter: blur(26px) saturate(1.7);
+  -webkit-backdrop-filter: blur(26px) saturate(1.7);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-lift);
+  z-index: 60;
+  opacity: 0;
+  transform: translateY(-8px) scale(0.97);
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease-out-back);
+}
+.tenant-menu.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+
+.tenant-menu-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-muted);
+  padding: 7px 9px 5px;
+  font-weight: 600;
+}
+.tenant-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--dur-fast) var(--ease);
+  width: 100%;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.tenant-option:hover { background: var(--glass-bg-hover); }
+.tenant-option.active {
+  background: rgba(var(--brand-primary-rgb), 0.16);
+  border-color: rgba(var(--brand-primary-rgb), 0.34);
+}
+.tenant-option .swatch {
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  flex: 0 0 26px;
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; color: #fff;
+}
+.tenant-option .t-name { font-size: 12.5px; font-weight: 500; }
+.tenant-option .t-role {
+  font-size: 10px; color: var(--text-muted);
+  display: block;
+}
+.tenant-option .check { margin-left: auto; color: var(--brand-secondary); opacity: 0; }
+.tenant-option.active .check { opacity: 1; }
+
+/* Navegación */
+.nav { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.nav-group-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-muted);
+  padding: 13px 10px 6px;
+  font-weight: 600;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9.5px 11px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: none;
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
+  transition: all var(--dur-fast) var(--ease);
+  position: relative;
+}
+.nav-item svg { flex: 0 0 17px; opacity: 0.85; }
+.nav-item:hover { background: var(--glass-bg-hover); color: var(--text-primary); }
+.nav-item.active {
+  background: linear-gradient(90deg, rgba(var(--brand-primary-rgb), 0.2), rgba(var(--brand-primary-rgb), 0.05));
+  color: var(--text-primary);
+  border-color: rgba(var(--brand-primary-rgb), 0.26);
+}
+/* Barra indicadora del item activo */
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: var(--brand-primary);
+  box-shadow: 0 0 10px var(--brand-primary);
+}
+.nav-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: rgba(var(--brand-accent-rgb), 0.18);
+  color: var(--brand-accent);
+  border: 1px solid rgba(var(--brand-accent-rgb), 0.3);
+}
+
+.sidebar-footer { margin-top: auto; padding-top: 14px; }
+.user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border-soft);
+}
+.avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  flex: 0 0 32px;
+  background: linear-gradient(135deg, var(--brand-secondary), var(--brand-primary));
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 700; color: #fff;
+}
+.user-name { font-size: 12.5px; font-weight: 500; }
+.user-mail { font-size: 10px; color: var(--text-muted); }
+
+/* ------------------------------ Main ------------------------------------ */
+.main {
+  padding: 18px 24px 40px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  padding: 10px 0;
+  background: linear-gradient(180deg, var(--bg-base) 55%, transparent);
+}
+.topbar h1 {
+  font-family: var(--brand-heading-font);
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.025em;
+}
+.topbar .subtitle { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+  border-radius: var(--radius);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+  min-width: 240px;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.search:focus-within {
+  border-color: rgba(var(--brand-primary-rgb), 0.5);
+  box-shadow: 0 0 0 3px rgba(var(--brand-primary-rgb), 0.13);
+}
+.search input {
+  background: none; border: none; outline: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  width: 100%;
+}
+.search input::placeholder { color: var(--text-muted); }
+.search kbd {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted);
+  font-family: inherit;
+}
+
+.icon-btn {
+  width: 38px; height: 38px;
+  border-radius: var(--radius-sm);
+  display: grid; place-items: center;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--dur-fast) var(--ease);
+}
+.icon-btn:hover { background: var(--glass-bg-hover); color: var(--text-primary); }
+.icon-btn .dot {
+  position: absolute;
+  top: 8px; right: 9px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--bg-deep);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9.5px 15px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  transition: all var(--dur-fast) var(--ease);
+  white-space: nowrap;
+}
+.btn:hover { background: var(--glass-bg-hover); transform: translateY(-1px); }
+.btn-primary {
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 6px 20px rgba(var(--brand-primary-rgb), 0.34);
+}
+.btn-primary:hover { box-shadow: 0 9px 28px rgba(var(--brand-primary-rgb), 0.46); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* =========================================================================
+   KPIs
+   ========================================================================= */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+  gap: 14px;
+}
+.kpi {
+  padding: calc(17px * var(--density)) calc(18px * var(--density));
+  border-radius: var(--radius-lg);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur)) saturate(1.7);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.7);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-glass);
+  position: relative;
+  overflow: hidden;
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  animation: rise var(--dur-slow) var(--ease-out-back) backwards;
+}
+.kpi:nth-child(1) { animation-delay: 40ms; }
+.kpi:nth-child(2) { animation-delay: 90ms; }
+.kpi:nth-child(3) { animation-delay: 140ms; }
+.kpi:nth-child(4) { animation-delay: 190ms; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.kpi:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lift);
+  border-color: rgba(var(--brand-primary-rgb), 0.3);
+}
+/* Halo de marca en la esquina: da identidad sin ensuciar la lectura */
+.kpi::after {
+  content: '';
+  position: absolute;
+  top: -46px; right: -46px;
+  width: 116px; height: 116px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--brand-primary-rgb), 0.22), transparent 70%);
+  pointer-events: none;
+}
+.kpi-head { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
+.kpi-icon {
+  width: 32px; height: 32px;
+  border-radius: 10px;
+  display: grid; place-items: center;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--glass-border-soft);
+  flex: 0 0 32px;
+}
+.kpi-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.kpi-value {
+  font-family: var(--brand-heading-font);
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-foot { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 11.5px; }
+.trend { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; }
+.trend.up   { color: var(--success); }
+.trend.down { color: var(--danger); }
+.trend.flat { color: var(--text-muted); }
+.kpi-foot .muted { color: var(--text-muted); }
+
+/* Sparkline dentro del KPI */
+.spark { margin-top: 11px; height: 34px; }
+
+/* =========================================================================
+   Layout de paneles
+   ========================================================================= */
+.grid-2-1 { display: grid; grid-template-columns: 1.62fr 1fr; gap: 14px; }
+.grid-1-1 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 1180px) {
+  .grid-2-1, .grid-1-1 { grid-template-columns: 1fr; }
+}
+
+.panel {
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur)) saturate(1.7);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.7);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-glass);
+  position: relative;
+  overflow: hidden;
+  animation: rise var(--dur-slow) var(--ease-out-back) backwards;
+  animation-delay: 200ms;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+.panel-title {
+  font-family: var(--brand-heading-font);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.panel-sub { font-size: 11.5px; color: var(--text-muted); }
+.panel-head .spacer { margin-left: auto; }
+
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.045);
+  border: 1px solid var(--glass-border-soft);
+  gap: 2px;
+}
+.seg button {
+  padding: 5.5px 11px;
+  border-radius: 7px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+.seg button:hover { color: var(--text-secondary); }
+.seg button.active {
+  background: rgba(var(--brand-primary-rgb), 0.22);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* Gráfico */
+.chart-wrap { position: relative; height: 268px; }
+.chart-wrap.tall { height: 320px; }
+
+/* Tooltip del gráfico */
+.tip {
+  position: absolute;
+  pointer-events: none;
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: rgba(10, 15, 34, 0.95);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-lift);
+  font-size: 11.5px;
+  opacity: 0;
+  transform: translate(-50%, -118%);
+  transition: opacity var(--dur-fast) var(--ease);
+  z-index: 20;
+  white-space: nowrap;
+}
+.tip.show { opacity: 1; }
+.tip .tip-title { font-weight: 600; margin-bottom: 3px; }
+.tip .tip-row { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+.tip .tip-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; }
+.tip .tip-val { margin-left: auto; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+/* =========================================================================
+   Tablas
+   ========================================================================= */
+.table-scroll { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
+table.data {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+  min-width: 640px;
+}
+table.data th {
+  text-align: left;
+  padding: 9px 11px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--glass-border);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: rgba(10, 15, 34, 0.9);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 2;
+}
+table.data td {
+  padding: 10px 11px;
+  border-bottom: 1px solid var(--glass-border-soft);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+table.data tbody tr { transition: background var(--dur-fast) var(--ease); }
+table.data tbody tr:hover { background: var(--glass-bg-hover); }
+table.data td.num, table.data th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data .strong { color: var(--text-primary); font-weight: 600; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pill::before {
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.pill.ok       { background: rgba(52,211,153,0.14); color: var(--success); border: 1px solid rgba(52,211,153,0.28); }
+.pill.warn     { background: rgba(251,191,36,0.14); color: var(--warning); border: 1px solid rgba(251,191,36,0.28); }
+.pill.danger   { background: rgba(248,113,113,0.14); color: var(--danger); border: 1px solid rgba(248,113,113,0.28); }
+.pill.info     { background: rgba(96,165,250,0.14); color: var(--info); border: 1px solid rgba(96,165,250,0.28); }
+.pill.neutral  { background: rgba(255,255,255,0.07); color: var(--text-secondary); border: 1px solid var(--glass-border); }
+/* Pulso lento en estados "en vivo": comunica actividad sin distraer */
+.pill.live::before { animation: pulse 2.1s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 currentColor; }
+  50%      { opacity: 0.55; box-shadow: 0 0 0 3px rgba(255,255,255,0); }
+}
+
+/* Progreso */
+.bar {
+  height: 6px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+  position: relative;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--brand-primary), var(--brand-secondary));
+  transition: width var(--dur-slow) var(--ease);
+}
+.bar.warn > span { background: linear-gradient(90deg, var(--warning), var(--brand-accent)); }
+.bar.danger > span { background: linear-gradient(90deg, var(--danger), var(--warning)); }
+
+/* =========================================================================
+   Lista de stock crítico / envíos
+   ========================================================================= */
+.list { display: flex; flex-direction: column; gap: 8px; }
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--glass-border-soft);
+  transition: all var(--dur-fast) var(--ease);
+}
+.row:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border);
+  transform: translateX(2px);
+}
+.row-avatar {
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  flex: 0 0 34px;
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 700;
+  background: linear-gradient(135deg, rgba(var(--brand-primary-rgb),0.28), rgba(var(--brand-secondary-rgb),0.18));
+  border: 1px solid var(--glass-border-soft);
+  color: var(--text-primary);
+}
+.row-body { flex: 1; min-width: 0; }
+.row-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-sub { font-size: 10.5px; color: var(--text-muted); }
+.row-right { text-align: right; flex: 0 0 auto; }
+.row-value { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* =========================================================================
+   Mapa en vivo (envíos)
+   ========================================================================= */
+.map {
+  position: relative;
+  height: 268px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--glass-border-soft);
+  background:
+    /* grilla topográfica tenue + rutas */
+    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 100% 34px,
+    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 34px 100%,
+    radial-gradient(ellipse at 30% 20%, rgba(var(--brand-primary-rgb), 0.16), transparent 62%),
+    radial-gradient(ellipse at 75% 80%, rgba(var(--brand-secondary-rgb), 0.13), transparent 62%),
+    rgba(6, 10, 24, 0.7);
+}
+.map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.map-legend {
+  position: absolute;
+  left: 11px; bottom: 11px;
+  display: flex;
+  gap: 11px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background: rgba(10, 15, 34, 0.86);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  font-size: 10.5px;
+}
+.map-legend span { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); }
+.map-legend i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+
+/* Marcador de vehículo animado */
+.vehicle { transition: transform 1.4s var(--ease); }
+.vehicle-halo { animation: halo 2.4s ease-out infinite; }
+@keyframes halo {
+  0%   { r: 7; opacity: 0.5; }
+  100% { r: 22; opacity: 0; }
+}
+
+/* =========================================================================
+   Panel lateral: identidad / branding
+   ========================================================================= */
+.branding-preview {
+  border-radius: var(--radius);
+  padding: 15px;
+  border: 1px solid var(--glass-border-soft);
+  background: rgba(255,255,255,0.025);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.swatch-row { display: flex; gap: 8px; }
+.swatch-item { flex: 1; }
+.swatch-chip {
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  margin-bottom: 5px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
+}
+.swatch-name { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.swatch-hex { font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+
+.template-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.template-card {
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border-soft);
+  background: rgba(255,255,255,0.025);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+.template-card:hover { background: var(--glass-bg-hover); border-color: var(--glass-border); }
+.template-card.active {
+  border-color: rgba(var(--brand-primary-rgb), 0.5);
+  background: rgba(var(--brand-primary-rgb), 0.13);
+  box-shadow: 0 0 0 3px rgba(var(--brand-primary-rgb), 0.1);
+}
+.template-name { font-size: 11.5px; font-weight: 600; margin-bottom: 2px; }
+.template-desc { font-size: 10px; color: var(--text-muted); line-height: 1.4; }
+
+.preview-mini {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 5px;
+  height: 40px;
+  margin-bottom: 8px;
+}
+.preview-mini .pm-side { border-radius: 4px; background: rgba(255,255,255,0.09); }
+.preview-mini .pm-body { display: flex; flex-direction: column; gap: 3px; }
+.preview-mini .pm-bar { height: 7px; border-radius: 3px; background: rgba(255,255,255,0.09); }
+.preview-mini .pm-bar.accent { background: currentColor; opacity: 0.55; }
+.preview-mini .pm-row { display: flex; gap: 3px; flex: 1; }
+.preview-mini .pm-cell { flex: 1; border-radius: 3px; background: rgba(255,255,255,0.055); }
+
+/* =========================================================================
+   Toast
+   ========================================================================= */
+.toast-stack {
+  position: fixed;
+  bottom: 22px; right: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  z-index: 200;
+  max-width: 340px;
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px 15px;
+  border-radius: var(--radius);
+  background: rgba(12, 18, 38, 0.94);
+  backdrop-filter: blur(22px) saturate(1.6);
+  -webkit-backdrop-filter: blur(22px) saturate(1.6);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-lift);
+  animation: slide-in var(--dur) var(--ease-out-back);
+  font-size: 12.5px;
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(28px) scale(0.96); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+.toast.out { animation: slide-out var(--dur) var(--ease) forwards; }
+@keyframes slide-out {
+  to { opacity: 0; transform: translateX(28px) scale(0.96); }
+}
+.toast-icon {
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  flex: 0 0 26px;
+  display: grid; place-items: center;
+}
+.toast-icon.ok { background: rgba(52,211,153,0.16); color: var(--success); }
+.toast-icon.info { background: rgba(96,165,250,0.16); color: var(--info); }
+.toast-icon.warn { background: rgba(251,191,36,0.16); color: var(--warning); }
+.toast-title { font-weight: 600; margin-bottom: 1px; }
+.toast-msg { color: var(--text-muted); font-size: 11.5px; line-height: 1.45; }
+
+/* =========================================================================
+   Responsive
+   ========================================================================= */
+.mobile-toggle { display: none; }
+
+@media (max-width: 980px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 274px;
+    z-index: 100;
+    transform: translateX(-102%);
+    transition: transform var(--dur) var(--ease);
+    box-shadow: var(--shadow-lift);
+    background: rgba(8, 12, 28, 0.97);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .mobile-toggle { display: grid; }
+  .main { padding: 14px 15px 34px; }
+  .search { min-width: 0; flex: 1; }
+  .search kbd { display: none; }
+  .new-sale-label { display: none; }
+}
+@media (max-width: 620px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+  .topbar h1 { font-size: 18px; }
+  .template-picker { grid-template-columns: 1fr; }
+  .toast-stack { left: 14px; right: 14px; bottom: 14px; max-width: none; }
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 7, 18, 0.6);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  z-index: 90;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+.scrim.show { opacity: 1; pointer-events: auto; }
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar" id="sidebar">
+    <div style="position:relative">
+      <button class="brand-lockup" id="tenantSwitcher" aria-expanded="false" aria-haspopup="listbox">
+        <div class="brand-mark" id="brandMark">AT</div>
+        <div class="brand-text">
+          <div class="brand-name" id="brandName">Andes Trading</div>
+          <div class="brand-meta" id="brandMeta">Distribuidora · 3 depósitos</div>
+        </div>
+        <svg class="chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+          <path d="m6 9 6 6 6-6"/>
+        </svg>
+      </button>
+
+      <div class="tenant-menu" id="tenantMenu" role="listbox" aria-label="Seleccionar empresa">
+        <div class="tenant-menu-label">Empresas</div>
+        <!-- Se pueblan por JS -->
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="Navegación principal">
+      <div class="nav-group-label">Operación</div>
+      <a class="nav-item active" href="#" data-view="dashboard">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/>
+          <rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>
+        </svg>
+        <span>Dashboard</span>
+      </a>
+      <a class="nav-item" href="#" data-view="sales">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 5-6"/>
+        </svg>
+        <span>Ventas</span>
+      </a>
+      <a class="nav-item" href="#" data-view="billing">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <path d="M14 2v6h6M9 13h6M9 17h4"/>
+        </svg>
+        <span>Facturación AFIP</span>
+        <span class="nav-badge">4</span>
+      </a>
+
+      <div class="nav-group-label">Inventario</div>
+      <a class="nav-item" href="#" data-view="catalog">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m21 8-9-5-9 5 9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>
+        </svg>
+        <span>Catálogo</span>
+      </a>
+      <a class="nav-item" href="#" data-view="stock">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 21V8l9-5 9 5v13"/><path d="M9 21v-6h6v6"/>
+        </svg>
+        <span>Stock multidéposito</span>
+      </a>
+
+      <div class="nav-group-label">Logística</div>
+      <a class="nav-item" href="#" data-view="shipping">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 18h14M5 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm14 0a2 2 0 1 1 4 0 2 2 0 0 1-4 0Z"/>
+          <path d="M3 18V7a1 1 0 0 1 1-1h10v12M14 10h4l3 4v4"/>
+        </svg>
+        <span>Envíos y tracking</span>
+        <span class="nav-badge" id="navShipBadge">7</span>
+      </a>
+
+      <div class="nav-group-label">Configuración</div>
+      <a class="nav-item" href="#" data-view="branding">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>
+          <path d="M12 3a9 9 0 0 0 0 18"/>
+        </svg>
+        <span>Identidad y plantillas</span>
+      </a>
+      <a class="nav-item" href="#" data-view="team">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+        </svg>
+        <span>Equipo y roles</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-card">
+        <div class="avatar">EM</div>
+        <div style="min-width:0;flex:1">
+          <div class="user-name">Emanuel R.</div>
+          <div class="user-mail">emanuel@andestrading.com.ar</div>
+        </div>
+        <span class="pill ok" style="font-size:9.5px">Owner</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ===================== MAIN ===================== -->
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn mobile-toggle" id="mobileToggle" aria-label="Abrir menú">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M3 6h18M3 12h18M3 18h18"/>
+        </svg>
+      </button>
+      <div>
+        <h1 id="viewTitle">Panel general</h1>
+        <div class="subtitle" id="viewSubtitle">Viernes 18 de septiembre, 2026 · datos en vivo</div>
+      </div>
+      <div class="topbar-actions">
+        <label class="search" aria-label="Buscar">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+          </svg>
+          <input type="search" placeholder="Buscar producto, cliente, envío…" id="globalSearch">
+          <kbd>⌘K</kbd>
+        </label>
+        <button class="icon-btn" id="notifBtn" aria-label="Notificaciones">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>
+          </svg>
+          <span class="dot"></span>
+        </button>
+        <button class="btn btn-primary" id="exportBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/>
+          </svg>
+          <span class="new-sale-label">Exportar</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- KPIs -->
+    <section class="kpi-grid" id="kpiGrid" aria-label="Indicadores principales"></section>
+
+    <!-- Fila 1: ventas + stock crítico -->
+    <section class="grid-2-1">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Evolución de ventas</div>
+            <div class="panel-sub" id="salesSub">Últimos 30 días · facturado vs. cobrado</div>
+          </div>
+          <div class="spacer"></div>
+          <div class="seg" data-chart-range="sales">
+            <button data-range="7">7d</button>
+            <button data-range="30" class="active">30d</button>
+            <button data-range="90">90d</button>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <svg id="salesChart" viewBox="0 0 720 268" preserveAspectRatio="none" role="img" aria-label="Gráfico de evolución de ventas"></svg>
+          <div class="tip" id="salesTip"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Stock crítico</div>
+            <div class="panel-sub">Bajo punto de reposición</div>
+          </div>
+          <div class="spacer"></div>
+          <span class="pill warn" id="lowStockCount">—</span>
+        </div>
+        <div class="list" id="lowStockList"></div>
+      </div>
+    </section>
+
+    <!-- Fila 2: mapa de envíos + mezcla de categorías -->
+    <section class="grid-2-1">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Torre de control logística</div>
+            <div class="panel-sub">Posición en vivo · actualización automática</div>
+          </div>
+          <div class="spacer"></div>
+          <span class="pill ok live" id="livePill">En vivo</span>
+        </div>
+        <div class="map" id="map">
+          <svg id="mapSvg" viewBox="0 0 720 268" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Mapa de envíos en tránsito"></svg>
+          <div class="map-legend">
+            <span><i style="background:var(--success)"></i>Entregado</span>
+            <span><i style="background:var(--brand-secondary)"></i>En tránsito</span>
+            <span><i style="background:var(--warning)"></i>Incidencia</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Mezcla por categoría</div>
+            <div class="panel-sub">Participación sobre ventas del mes</div>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <svg id="categoryChart" viewBox="0 0 320 268" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Distribución de ventas por categoría"></svg>
+          <div class="tip" id="categoryTip"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Fila 3: facturas + branding -->
+    <section class="grid-2-1">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Comprobantes AFIP recientes</div>
+            <div class="panel-sub">Estado de CAE y respuesta del web service</div>
+          </div>
+          <div class="spacer"></div>
+          <div class="seg">
+            <button class="active">Todos</button>
+            <button>Autorizados</button>
+            <button>Pendientes</button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Comprobante</th>
+                <th>Cliente</th>
+                <th>CAE</th>
+                <th class="num">Total</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="invoiceTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Identidad de la empresa</div>
+            <div class="panel-sub">Whitelabel en vivo</div>
+          </div>
+        </div>
+
+        <div class="branding-preview">
+          <div>
+            <div class="swatch-name" style="margin-bottom:7px">Paleta</div>
+            <div class="swatch-row">
+              <div class="swatch-item">
+                <div class="swatch-chip" id="swPrimary"></div>
+                <div class="swatch-name">Primary</div>
+                <div class="swatch-hex" id="swPrimaryHex">—</div>
+              </div>
+              <div class="swatch-item">
+                <div class="swatch-chip" id="swSecondary"></div>
+                <div class="swatch-name">Secondary</div>
+                <div class="swatch-hex" id="swSecondaryHex">—</div>
+              </div>
+              <div class="swatch-item">
+                <div class="swatch-chip" id="swAccent"></div>
+                <div class="swatch-name">Accent</div>
+                <div class="swatch-hex" id="swAccentHex">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="swatch-name" style="margin-bottom:7px">Plantilla de interfaz</div>
+            <div class="template-picker" id="templatePicker"></div>
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" style="flex:1;justify-content:center" id="exportPdfBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>
+              </svg>
+              PDF
+            </button>
+            <button class="btn" style="flex:1;justify-content:center" id="exportXlsxBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+              </svg>
+              Excel
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Fila 4: envíos activos -->
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">Envíos activos</div>
+          <div class="panel-sub">Confirmación de descarga por el cliente final</div>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn" id="simulateBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m12 3 1.9 5.8H20l-4.9 3.6 1.9 5.8-5-3.6-5 3.6 1.9-5.8L4 8.8h6.1z"/>
+          </svg>
+          Simular evento de tracking
+        </button>
+      </div>
+      <div class="table-scroll">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Tracking</th>
+              <th>Destino</th>
+              <th>Conductor</th>
+              <th>Estado</th>
+              <th style="min-width:130px">Progreso</th>
+              <th>Último evento</th>
+            </tr>
+          </thead>
+          <tbody id="shipmentTable"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
+
+<script>
+/* ===========================================================================
+   Control · Prototipo funcional
+   ---------------------------------------------------------------------------
+   Datos simulados en memoria. El objetivo de este prototipo es validar:
+     - el sistema de tokens de marca (switcher de empresa),
+     - la densidad y las plantillas por rubro,
+     - el comportamiento visual del glass sobre el fondo animado,
+     - los gráficos SVG sin dependencias externas,
+     - el flujo de exportación con identidad dinámica.
+   En la app real estos datos llegan de /api/v1/* con el contexto de sesión.
+   =========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   Catálogo de empresas (tenants). Cada una con su identidad y plantilla.
+   --------------------------------------------------------------------------- */
+const TENANTS = [
+  {
+    id: 't-andes',
+    name: 'Andes Trading',
+    initials: 'AT',
+    meta: 'Distribuidora · 3 depósitos',
+    role: 'Owner',
+    vertical: 'distributor',
+    template: 'distributor-glass',
+    density: 'compact',
+    brand: {
+      primary: '#6D5EF8',
+      secondary: '#22D3EE',
+      accent: '#F59E0B',
+      heading: "'Space Grotesk', system-ui, sans-serif",
+    },
+    kpis: {
+      salesToday: 4820500,
+      ticketAvg: 68400,
+      stockValue: 128400000,
+      shipmentsActive: 23,
+      lowStockAlerts: 7,
+      onTimeRate: 94.2,
+      pendingInvoices: 4,
+    },
+    categories: [
+      { name: 'Indumentaria urbana', pct: 34.2, color: '#6D5EF8' },
+      { name: 'Calzado',             pct: 24.8, color: '#22D3EE' },
+      { name: 'Accesorios',          pct: 18.1, color: '#F59E0B' },
+      { name: 'Skate & longboard',   pct: 13.4, color: '#34D399' },
+      { name: 'Suplementos',         pct: 9.5,  color: '#F87171' },
+    ],
+  },
+  {
+    id: 't-nordico',
+    name: 'Nórdico Retail',
+    initials: 'NR',
+    meta: 'Retail · 1 salón',
+    role: 'Administrador',
+    vertical: 'retail',
+    template: 'retail-glass',
+    density: 'comfy',
+    brand: {
+      primary: '#E879A6',
+      secondary: '#A78BFA',
+      accent: '#FCD34D',
+      heading: "'Inter', system-ui, sans-serif",
+    },
+    kpis: {
+      salesToday: 1284600,
+      ticketAvg: 42500,
+      stockValue: 34900000,
+      shipmentsActive: 5,
+      lowStockAlerts: 12,
+      onTimeRate: 97.8,
+      pendingInvoices: 1,
+    },
+    categories: [
+      { name: 'Punto',      pct: 38.5, color: '#E879A6' },
+      { name: 'Mercería',   pct: 26.2, color: '#A78BFA' },
+      { name: 'Lencería',   pct: 19.7, color: '#FCD34D' },
+      { name: 'Accesorios', pct: 15.6, color: '#5EEAD4' },
+    ],
+  },
+  {
+    id: 't-pampa',
+    name: 'Pampa Logística',
+    initials: 'PL',
+    meta: 'Transporte · 14 unidades',
+    role: 'Supervisor',
+    vertical: 'logistics',
+    template: 'logistics-glass',
+    density: 'compact',
+    brand: {
+      primary: '#10B981',
+      secondary: '#38BDF8',
+      accent: '#FB7185',
+      heading: "'Space Grotesk', system-ui, sans-serif",
+    },
+    kpis: {
+      salesToday: 2840000,
+      ticketAvg: 142000,
+      stockValue: 8200000,
+      shipmentsActive: 47,
+      lowStockAlerts: 2,
+      onTimeRate: 88.6,
+      pendingInvoices: 9,
+    },
+    categories: [
+      { name: 'Granel',     pct: 41.3, color: '#10B981' },
+      { name: 'Refrigerado',pct: 27.9, color: '#38BDF8' },
+      { name: 'General',    pct: 18.4, color: '#FB7185' },
+      { name: 'Peligrosa',  pct: 12.4, color: '#FBBF24' },
+    ],
+  },
+  {
+    id: 't-sur',
+    name: 'Sur Servicios',
+    initials: 'SS',
+    meta: 'Servicios · 8 profesionales',
+    role: 'Contador',
+    vertical: 'services',
+    template: 'services-glass',
+    density: 'comfy',
+    brand: {
+      primary: '#F97316',
+      secondary: '#14B8A6',
+      accent: '#8B5CF6',
+      heading: "'Inter', system-ui, sans-serif",
+    },
+    kpis: {
+      salesToday: 986000,
+      ticketAvg: 98600,
+      stockValue: 1240000,
+      shipmentsActive: 8,
+      lowStockAlerts: 3,
+      onTimeRate: 91.4,
+      pendingInvoices: 6,
+    },
+    categories: [
+      { name: 'Consultoría', pct: 44.8, color: '#F97316' },
+      { name: 'Mantenimiento', pct: 28.3, color: '#14B8A6' },
+      { name: 'Instalación', pct: 16.2, color: '#8B5CF6' },
+      { name: 'Soporte',     pct: 10.7, color: '#60A5FA' },
+    ],
+  },
+];
+
+const TEMPLATES = [
+  { key: 'retail-glass',      name: 'Retail Glass',       desc: 'Ventas diarias y rotación',       vertical: 'retail' },
+  { key: 'services-glass',    name: 'Services Glass',     desc: 'SLA y órdenes abiertas',          vertical: 'services' },
+  { key: 'distributor-glass', name: 'Distributor Glass',  desc: 'Stock multidéposito y rutas',     vertical: 'distributor' },
+  { key: 'logistics-glass',   name: 'Logistics Glass',    desc: 'Torre de control y flota',        vertical: 'logistics' },
+  { key: 'mixed-glass',       name: 'Mixed Glass',        desc: 'Comercio con reparto propio',     vertical: 'mixed' },
+];
+
+/* ---------------------------------------------------------------------------
+   Aplicación del tema de marca
+   --------------------------------------------------------------------------- */
+const root = document.documentElement;
+
+function hexToRgbTriplet(hex) {
+  const clean = hex.replace('#', '');
+  return [
+    parseInt(clean.slice(0, 2), 16),
+    parseInt(clean.slice(2, 4), 16),
+    parseInt(clean.slice(4, 6), 16),
+  ].join(', ');
+}
+
+function applyBrand(tenant) {
+  root.style.setProperty('--brand-primary', tenant.brand.primary);
+  root.style.setProperty('--brand-secondary', tenant.brand.secondary);
+  root.style.setProperty('--brand-accent', tenant.brand.accent);
+  root.style.setProperty('--brand-primary-rgb', hexToRgbTriplet(tenant.brand.primary));
+  root.style.setProperty('--brand-secondary-rgb', hexToRgbTriplet(tenant.brand.secondary));
+  root.style.setProperty('--brand-accent-rgb', hexToRgbTriplet(tenant.brand.accent));
+  root.style.setProperty('--brand-heading-font', tenant.brand.heading);
+
+  root.dataset.density = tenant.density === 'comfy' ? 'comfy' : 'compact';
+
+  document.getElementById('brandMark').textContent = tenant.initials;
+  document.getElementById('brandMark').style.background =
+    `linear-gradient(135deg, ${tenant.brand.primary}, ${tenant.brand.secondary})`;
+  document.getElementById('brandName').textContent = tenant.name;
+  document.getElementById('brandMeta').textContent = tenant.meta;
+
+  document.getElementById('swPrimary').style.background = tenant.brand.primary;
+  document.getElementById('swSecondary').style.background = tenant.brand.secondary;
+  document.getElementById('swAccent').style.background = tenant.brand.accent;
+  document.getElementById('swPrimaryHex').textContent = tenant.brand.primary.toUpperCase();
+  document.getElementById('swSecondaryHex').textContent = tenant.brand.secondary.toUpperCase();
+  document.getElementById('swAccentHex').textContent = tenant.brand.accent.toUpperCase();
+
+  renderTemplatePicker(tenant.template);
+}
+
+/* ---------------------------------------------------------------------------
+   Formateadores
+   --------------------------------------------------------------------------- */
+const nfCurrency = new Intl.NumberFormat('es-AR', {
+  style: 'currency', currency: 'ARS', maximumFractionDigits: 0,
+});
+const nfCompact = new Intl.NumberFormat('es-AR', {
+  notation: 'compact', maximumFractionDigits: 1,
+});
+const nfNumber = new Intl.NumberFormat('es-AR');
+
+function money(n) { return nfCurrency.format(n); }
+function compact(n) { return n > 999999 ? '$' + nfCompact.format(n) : money(n); }
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* ---------------------------------------------------------------------------
+   Generación de series pseudoaleatorias reproducibles.
+   Se usa un LCG con semilla fija: el prototipo debe verse idéntico en cada
+   recarga, si no es imposible comparar dos variantes de diseño.
+   --------------------------------------------------------------------------- */
+function seeded(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function buildSalesSeries(days, seed, base) {
+  const rnd = seeded(seed);
+  const out = [];
+  let trend = base;
+  const today = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dow = d.getDay();
+    // Fin de semana más flojo, con ruido suave y una tendencia leve
+    const weekend = dow === 0 || dow === 6 ? 0.68 : 1;
+    trend = trend * (0.995 + rnd() * 0.018);
+    const invoiced = Math.round(trend * weekend * (0.9 + rnd() * 0.2));
+    out.push({
+      date: d,
+      invoiced,
+      collected: Math.round(invoiced * (0.72 + rnd() * 0.24)),
+    });
+  }
+  return out;
+}
+
+/* ---------------------------------------------------------------------------
+   Gráficos SVG (sin librerías — control total del theming)
+   --------------------------------------------------------------------------- */
+function chartColors() {
+  const cs = getComputedStyle(root);
+  return {
+    primary: cs.getPropertyValue('--brand-primary').trim(),
+    secondary: cs.getPropertyValue('--brand-secondary').trim(),
+    accent: cs.getPropertyValue('--brand-accent').trim(),
+    text: cs.getPropertyValue('--text-primary').trim(),
+    muted: cs.getPropertyValue('--text-muted').trim(),
+    grid: 'rgba(255,255,255,0.06)',
+    secondaryRgb: cs.getPropertyValue('--brand-secondary-rgb').trim(),
+  };
+}
+
+/** Curva suavizada (Catmull-Rom → Bézier). Evita el aspecto de sierra. */
+function smoothPath(points) {
+  if (points.length < 2) return '';
+  let d = `M ${points[0][0]} ${points[0][1]}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+    const t = 0.19;
+    const c1x = p1[0] + (p2[0] - p0[0]) * t;
+    const c1y = p1[1] + (p2[1] - p0[1]) * t;
+    const c2x = p2[0] - (p3[0] - p1[0]) * t;
+    const c2y = p2[1] - (p3[1] - p1[1]) * t;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2[0]} ${p2[1]}`;
+  }
+  return d;
+}
+
+let salesState = { days: 30, series: [] };
+
+function renderSalesChart(days) {
+  const svg = document.getElementById('salesChart');
+  const C = chartColors();
+  const W = 720, H = 268;
+  const pad = { t: 18, r: 14, b: 30, l: 52 };
+  const iw = W - pad.l - pad.r;
+  const ih = H - pad.t - pad.b;
+
+  const series = buildSalesSeries(days, 1337 + days, 1600000);
+  salesState = { days, series };
+
+  const max = Math.max(...series.map((d) => d.invoiced)) * 1.14;
+  const x = (i) => pad.l + (i / (series.length - 1 || 1)) * iw;
+  const y = (v) => pad.t + ih - (v / max) * ih;
+
+  const invPts = series.map((d, i) => [x(i), y(d.invoiced)]);
+  const colPts = series.map((d, i) => [x(i), y(d.collected)]);
+
+  const invPath = smoothPath(invPts);
+  const colPath = smoothPath(colPts);
+  const areaPath = `${invPath} L ${x(series.length - 1)} ${pad.t + ih} L ${pad.l} ${pad.t + ih} Z`;
+
+  // Grilla horizontal + etiquetas del eje Y
+  let grid = '';
+  for (let i = 0; i <= 4; i++) {
+    const gy = pad.t + (ih / 4) * i;
+    const val = max - (max / 4) * i;
+    grid += `<line x1="${pad.l}" y1="${gy}" x2="${W - pad.r}" y2="${gy}"
+              stroke="${C.grid}" stroke-width="1" stroke-dasharray="3 5"/>`;
+    grid += `<text x="${pad.l - 9}" y="${gy + 3.5}" text-anchor="end"
+              font-size="9.5" fill="${C.muted}" font-family="Inter, sans-serif">${compact(val)}</text>`;
+  }
+
+  // Etiquetas del eje X: sólo 6, para que no se amontonen
+  let xLabels = '';
+  const step = Math.max(1, Math.floor(series.length / 6));
+  for (let i = 0; i < series.length; i += step) {
+    xLabels += `<text x="${x(i)}" y="${H - 9}" text-anchor="middle"
+                font-size="9.5" fill="${C.muted}" font-family="Inter, sans-serif">${
+                  series[i].date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
+                }</text>`;
+  }
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${C.primary}" stop-opacity="0.42"/>
+        <stop offset="100%" stop-color="${C.primary}" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="${C.primary}"/>
+        <stop offset="100%" stop-color="${C.secondary}"/>
+      </linearGradient>
+      <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="5" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    ${grid}
+    ${xLabels}
+    <path d="${areaPath}" fill="url(#areaGrad)"/>
+    <path d="${colPath}" fill="none" stroke="${C.secondary}" stroke-width="1.6"
+          stroke-dasharray="5 4" opacity="0.72" stroke-linecap="round"/>
+    <path d="${invPath}" fill="none" stroke="url(#lineGrad)" stroke-width="2.6"
+          stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+    <g id="salesHover"></g>
+  `;
+
+  wireSalesHover(series, x, y, pad, W, H, C);
+}
+
+function wireSalesHover(series, x, y, pad, W, H, C) {
+  const svg = document.getElementById('salesChart');
+  const tip = document.getElementById('salesTip');
+  const hoverLayer = svg.querySelector('#salesHover');
+
+  const onMove = (evt) => {
+    const rect = svg.getBoundingClientRect();
+    const px = ((evt.clientX - rect.left) / rect.width) * W;
+
+    // Índice más cercano a la posición del puntero
+    let best = 0, bestDist = Infinity;
+    for (let i = 0; i < series.length; i++) {
+      const d = Math.abs(x(i) - px);
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    const d = series[best];
+
+    hoverLayer.innerHTML = `
+      <line x1="${x(best)}" y1="${pad.t}" x2="${x(best)}" y2="${pad.t + (H - pad.t - pad.b)}"
+            stroke="${C.primary}" stroke-width="1" stroke-dasharray="2 4" opacity="0.55"/>
+      <circle cx="${x(best)}" cy="${y(d.invoiced)}" r="5.5" fill="${C.primary}"
+              stroke="#0A0F22" stroke-width="2.5"/>
+      <circle cx="${x(best)}" cy="${y(d.collected)}" r="4" fill="${C.secondary}"
+              stroke="#0A0F22" stroke-width="2"/>
+    `;
+
+    tip.innerHTML = `
+      <div class="tip-title">${d.date.toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: 'short' })}</div>
+      <div class="tip-row"><span class="tip-dot" style="background:${C.primary}"></span>Facturado<span class="tip-val">${money(d.invoiced)}</span></div>
+      <div class="tip-row"><span class="tip-dot" style="background:${C.secondary}"></span>Cobrado<span class="tip-val">${money(d.collected)}</span></div>
+    `;
+    tip.classList.add('show');
+
+    const wrapRect = svg.parentElement.getBoundingClientRect();
+    tip.style.left = (evt.clientX - wrapRect.left) + 'px';
+    tip.style.top = (y(d.invoiced) / H * wrapRect.height + 8) + 'px';
+  };
+
+  const onLeave = () => {
+    hoverLayer.innerHTML = '';
+    tip.classList.remove('show');
+  };
+
+  svg.onmousemove = onMove;
+  svg.onmouseleave = onLeave;
+}
+
+/* --------------------------- Donut de categorías --------------------------- */
+function renderCategoryChart(categories) {
+  const svg = document.getElementById('categoryChart');
+  const tip = document.getElementById('categoryTip');
+  const C = chartColors();
+  const cx = 160, cy = 118, rOuter = 92, rInner = 60;
+
+  const total = categories.reduce((a, c) => a + c.pct, 0);
+  let angle = -Math.PI / 2;
+  let arcs = '';
+
+  categories.forEach((cat, idx) => {
+    const sweep = (cat.pct / total) * Math.PI * 2;
+    const a0 = angle;
+    const a1 = angle + sweep;
+    angle = a1;
+
+    const large = sweep > Math.PI ? 1 : 0;
+    const p = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+
+    const [x0, y0] = p(rOuter, a0);
+    const [x1, y1] = p(rOuter, a1);
+    const [x2, y2] = p(rInner, a1);
+    const [x3, y3] = p(rInner, a0);
+
+    arcs += `<path d="M ${x0} ${y0} A ${rOuter} ${rOuter} 0 ${large} 1 ${x1} ${y1}
+                      L ${x2} ${y2} A ${rInner} ${rInner} 0 ${large} 0 ${x3} ${y3} Z"
+                  fill="${cat.color}" opacity="0.86"
+                  class="arc" data-idx="${idx}"
+                  style="transition:opacity 160ms ease;cursor:pointer"/>`;
+  });
+
+  // Leyenda, con el valor alineado a la derecha
+  let legend = '';
+  categories.forEach((cat, i) => {
+    const ly = 234 + 0;
+    // La leyenda va debajo del donut, en dos columnas
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const lx = col === 0 ? 12 : 166;
+    const yPos = 228 + row * 20;
+    legend += `
+      <g class="legend-item" data-idx="${i}" style="cursor:pointer">
+        <rect x="${lx}" y="${yPos}" width="8" height="8" rx="2.5" fill="${cat.color}"/>
+        <text x="${lx + 13}" y="${yPos + 7.5}" font-size="9.5" fill="${C.muted}"
+              font-family="Inter, sans-serif">${escapeHtml(cat.name.slice(0, 16))}</text>
+        <text x="${lx + 148}" y="${yPos + 7.5}" font-size="9.5" fill="${C.text}"
+              text-anchor="end" font-family="Inter, sans-serif" font-weight="600">${cat.pct.toFixed(1)}%</text>
+      </g>
+      <line x1="${lx}" y1="${yPos + 13}" x2="${lx + 148}" y2="${yPos + 13}"
+            stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
+  });
+
+  const top = categories.reduce((a, b) => (a.pct > b.pct ? a : b));
+
+  svg.innerHTML = `
+    <g>${arcs}</g>
+    <text x="${cx}" y="${cy - 6}" text-anchor="middle" font-size="10"
+          fill="${C.muted}" font-family="Inter, sans-serif" letter-spacing="0.6">TOP</text>
+    <text x="${cx}" y="${cy + 13}" text-anchor="middle" font-size="17"
+          fill="${C.text}" font-family="Space Grotesk, Inter, sans-serif" font-weight="700">
+      ${top.pct.toFixed(0)}%
+    </text>
+    <text x="${cx}" y="${cy + 28}" text-anchor="middle" font-size="8.5"
+          fill="${C.muted}" font-family="Inter, sans-serif">${escapeHtml(top.name.slice(0, 18))}</text>
+    ${legend}
+  `;
+
+  // Interacción: resalta el arco bajo el puntero
+  svg.querySelectorAll('.arc, .legend-item').forEach((el) => {
+    el.addEventListener('mouseenter', () => {
+      const i = Number(el.dataset.idx);
+      svg.querySelectorAll('.arc').forEach((a) => {
+        a.setAttribute('opacity', Number(a.dataset.idx) === i ? '1' : '0.28');
+      });
+      const cat = categories[i];
+      tip.innerHTML = `
+        <div class="tip-title">${escapeHtml(cat.name)}</div>
+        <div class="tip-row"><span class="tip-dot" style="background:${cat.color}"></span>Participación<span class="tip-val">${cat.pct.toFixed(1)}%</span></div>
+      `;
+      tip.classList.add('show');
+      const wrap = svg.parentElement.getBoundingClientRect();
+      tip.style.left = '50%';
+      tip.style.top = '34px';
+      void wrap;
+    });
+    el.addEventListener('mouseleave', () => {
+      svg.querySelectorAll('.arc').forEach((a) => a.setAttribute('opacity', '0.86'));
+      tip.classList.remove('show');
+    });
+  });
+}
+
+/* ------------------------------ Sparkline --------------------------------- */
+function sparkline(values, color, id) {
+  const W = 240, H = 34;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const pts = values.map((v, i) => [
+    (i / (values.length - 1)) * W,
+    H - ((v - min) / range) * (H - 6) - 3,
+  ]);
+  const path = smoothPath(pts);
+  const area = `${path} L ${W} ${H} L 0 ${H} Z`;
+
+  return `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="spark" aria-hidden="true">
+      <defs>
+        <linearGradient id="spark-${id}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${color}" stop-opacity="0.34"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="${area}" fill="url(#spark-${id})"/>
+      <path d="${path}" fill="none" stroke="${color}" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${pts[pts.length - 1][0]}" cy="${pts[pts.length - 1][1]}" r="2.6" fill="${color}"/>
+    </svg>
+  `;
+}
+
+/* ---------------------------------------------------------------------------
+   KPIs
+   --------------------------------------------------------------------------- */
+const KPI_ICONS = {
+  sales: '<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+  ticket: '<path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M13 7v10"/>',
+  stock: '<path d="m21 8-9-5-9 5 9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/>',
+  truck: '<path d="M5 18h14"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M3 18V7h11v11M14 10h4l3 3v5"/>',
+};
+
+function renderKpis(tenant) {
+  const C = chartColors();
+  const k = tenant.kpis;
+  const rnd = seeded(99 + tenant.id.length);
+
+  const seriesFor = (base, vol) =>
+    Array.from({ length: 16 }, (_, i) => base * (1 + Math.sin(i / 2.4) * vol * 0.5 + (rnd() - 0.5) * vol));
+
+  const items = [
+    {
+      label: 'Vendido hoy', value: money(k.salesToday),
+      delta: `+${(8 + rnd() * 9).toFixed(1)}%`, dir: 'up',
+      foot: 'vs. ayer', color: C.primary, icon: 'sales',
+      spark: seriesFor(k.salesToday, 0.3),
+    },
+    {
+      label: 'Ticket promedio', value: money(k.ticketAvg),
+      delta: `+${(2 + rnd() * 5).toFixed(1)}%`, dir: 'up',
+      foot: 'últimos 30 días', color: C.secondary, icon: 'ticket',
+      spark: seriesFor(k.ticketAvg, 0.22),
+    },
+    {
+      label: 'Valor de stock', value: compact(k.stockValue),
+      delta: `-${(1 + rnd() * 3).toFixed(1)}%`, dir: 'down',
+      foot: `${k.lowStockAlerts} alertas de reposición`, color: C.accent, icon: 'stock',
+      spark: seriesFor(k.stockValue, 0.16),
+    },
+    {
+      label: 'Envíos activos', value: String(k.shipmentsActive),
+      delta: `${k.onTimeRate.toFixed(1)}%`, dir: 'flat',
+      foot: 'cumplimiento de entrega', color: C.primary, icon: 'truck',
+      spark: seriesFor(k.shipmentsActive, 0.4),
+    },
+  ];
+
+  document.getElementById('kpiGrid').innerHTML = items.map((it, i) => `
+    <article class="kpi">
+      <div class="kpi-head">
+        <div class="kpi-icon" style="color:${it.color}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KPI_ICONS[it.icon]}</svg>
+        </div>
+        <span class="kpi-label">${it.label}</span>
+      </div>
+      <div class="kpi-value">${it.value}</div>
+      <div class="kpi-foot">
+        <span class="trend ${it.dir}">
+          ${it.dir === 'up' ? '▲' : it.dir === 'down' ? '▼' : '●'} ${it.delta}
+        </span>
+        <span class="muted">${it.foot}</span>
+      </div>
+      ${sparkline(it.spark, it.color, 'k' + i)}
+    </article>
+  `).join('');
+}
+
+/* ---------------------------------------------------------------------------
+   Stock crítico
+   --------------------------------------------------------------------------- */
+const LOW_STOCK = [
+  { name: 'Buzo Oversize Negro',    sku: 'BZO-OVR-NG-L',  wh: 'Dep. Central', onHand: 4,  min: 20 },
+  { name: 'Zapatilla Runner Pro',   sku: 'ZAP-RUN-PR-42', wh: 'Dep. Central', onHand: 2,  min: 15 },
+  { name: 'Tabla Skate 8.0"',       sku: 'SKA-DCK-80',    wh: 'Dep. Norte',   onHand: 6,  min: 12 },
+  { name: 'Mochila Urbana 25L',     sku: 'MOC-URB-25',    wh: 'Dep. Central', onHand: 9,  min: 18 },
+  { name: 'Gorra Snapback',         sku: 'GOR-SNP-BK',    wh: 'Dep. Sur',     onHand: 3,  min: 25 },
+  { name: 'Medias Pack x3',         sku: 'MED-PK3-BL',    wh: 'Dep. Norte',   onHand: 14, min: 30 },
+  { name: 'Campera Softshell',      sku: 'CMP-SFT-CH-M',  wh: 'Dep. Central', onHand: 1,  min: 8  },
+];
+
+function renderLowStock() {
+  const items = LOW_STOCK.slice(0, 6);
+  document.getElementById('lowStockCount').textContent = `${LOW_STOCK.length} alertas`;
+
+  document.getElementById('lowStockList').innerHTML = items.map((it) => {
+    const ratio = Math.max(0, Math.min(1, it.onHand / it.min));
+    const level = it.onHand / it.min < 0.25 ? 'danger' : 'warn';
+    return `
+      <div class="row">
+        <div class="row-avatar">${escapeHtml(it.sku.slice(0, 2))}</div>
+        <div class="row-body">
+          <div class="row-title">${escapeHtml(it.name)}</div>
+          <div class="row-sub">${escapeHtml(it.sku)} · ${escapeHtml(it.wh)}</div>
+          <div class="bar ${level}" style="margin-top:6px">
+            <span style="width:${Math.max(4, ratio * 100)}%"></span>
+          </div>
+        </div>
+        <div class="row-right">
+          <div class="row-value" style="color:${level === 'danger' ? 'var(--danger)' : 'var(--warning)'}">
+            ${it.onHand}
+          </div>
+          <div class="row-sub">mín ${it.min}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* ---------------------------------------------------------------------------
+   Mapa en vivo
+   --------------------------------------------------------------------------- */
+const SHIPMENTS = [
+  { code: 'CTL-84213', dest: 'Palermo, CABA',      driver: 'M. Sosa',    status: 'in_transit',       progress: 62, last: 'En tránsito · Av. Santa Fe', x: 0.28, y: 0.36 },
+  { code: 'CTL-84214', dest: 'Villa María, CBA',   driver: 'J. Pereyra', status: 'out_for_delivery', progress: 88, last: 'En reparto · última milla',  x: 0.62, y: 0.28 },
+  { code: 'CTL-84215', dest: 'Rosario, SF',        driver: 'L. Benítez', status: 'in_transit',       progress: 41, last: 'En tránsito · Ruta 9',       x: 0.74, y: 0.62 },
+  { code: 'CTL-84216', dest: 'Mendoza, MZA',       driver: 'R. Vega',    status: 'incident',         progress: 30, last: 'Incidencia · acceso bloqueado', x: 0.3, y: 0.78 },
+  { code: 'CTL-84217', dest: 'La Plata, BA',       driver: 'C. Molina',  status: 'delivered',        progress: 100, last: 'Entregado · conforme',       x: 0.48, y: 0.52 },
+  { code: 'CTL-84218', dest: 'Córdoba Capital',    driver: 'A. Ledesma', status: 'in_transit',       progress: 55, last: 'En tránsito · RP E53',       x: 0.86, y: 0.44 },
+  { code: 'CTL-84219', dest: 'Bahía Blanca, BA',   driver: 'F. Ríos',    status: 'preparing',        progress: 12, last: 'En preparación · depósito',  x: 0.16, y: 0.6  },
+];
+
+const STATUS_META = {
+  preparing:        { label: 'En preparación',   pill: 'neutral' },
+  ready:            { label: 'Listo',            pill: 'info' },
+  in_transit:       { label: 'En tránsito',      pill: 'info' },
+  out_for_delivery: { label: 'En reparto',       pill: 'info' },
+  delivered:        { label: 'Entregado',        pill: 'ok' },
+  incident:         { label: 'Incidencia',       pill: 'danger' },
+  cancelled:        { label: 'Cancelado',        pill: 'neutral' },
+};
+
+function renderMap() {
+  const C = chartColors();
+  const svg = document.getElementById('mapSvg');
+  const W = 720, H = 268;
+
+  // Rutas simuladas: curvas Bézier entre puntos
+  const routes = [
+    { d: 'M 90 230 C 200 190, 180 120, 280 100',  status: 'in_transit' },
+    { d: 'M 90 230 C 240 240, 340 200, 460 80',   status: 'in_transit' },
+    { d: 'M 460 80 C 540 110, 580 150, 610 175',  status: 'out_for_delivery' },
+    { d: 'M 90 230 C 180 260, 230 250, 300 218',  status: 'delivered' },
+    { d: 'M 610 175 C 640 200, 660 220, 660 240', status: 'in_transit' },
+  ];
+
+  const routeColor = (s) =>
+    s === 'delivered' ? C.secondary
+    : s === 'incident' ? '#F87171'
+    : 'rgba(255,255,255,0.18)';
+
+  const routesSvg = routes.map((r) => `
+    <path d="${r.d}" fill="none" stroke="${routeColor(r.status)}" stroke-width="1.6"
+          stroke-dasharray="${r.status === 'delivered' ? '0' : '5 6'}"
+          stroke-linecap="round" opacity="${r.status === 'delivered' ? 0.85 : 0.55}"/>
+  `).join('');
+
+  const pins = SHIPMENTS.map((s, i) => {
+    const cx = s.x * W;
+    const cy = s.y * H;
+    const color = s.status === 'delivered' ? '#34D399'
+      : s.status === 'incident' ? '#F87171'
+      : s.status === 'preparing' ? '#9BA6C7'
+      : C.secondary;
+    const isLive = s.status === 'in_transit' || s.status === 'out_for_delivery';
+
+    return `
+      <g class="pin" data-idx="${i}" style="cursor:pointer">
+        ${isLive ? `<circle class="vehicle-halo" cx="${cx}" cy="${cy}" r="7" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.5"/>` : ''}
+        <circle cx="${cx}" cy="${cy}" r="${s.status === 'incident' ? 7 : 5.5}" fill="${color}"
+                stroke="#080C1C" stroke-width="2"/>
+        <circle cx="${cx}" cy="${cy}" r="14" fill="transparent"/>
+      </g>
+    `;
+  }).join('');
+
+  svg.innerHTML = `${routesSvg}${pins}`;
+}
+
+function renderShipments() {
+  const C = chartColors();
+  document.getElementById('navShipBadge').textContent =
+    String(SHIPMENTS.filter((s) => s.status !== 'delivered').length);
+
+  document.getElementById('shipmentTable').innerHTML = SHIPMENTS.map((s, i) => {
+    const meta = STATUS_META[s.status];
+    return `
+      <tr data-idx="${i}">
+        <td class="strong">${escapeHtml(s.code)}</td>
+        <td>${escapeHtml(s.dest)}</td>
+        <td>${escapeHtml(s.driver)}</td>
+        <td><span class="pill ${meta.pill} ${s.status === 'in_transit' ? 'live' : ''}">${meta.label}</span></td>
+        <td>
+          <div class="bar" style="margin-bottom:5px">
+            <span style="width:${s.progress}%"></span>
+          </div>
+          <span style="font-size:10.5px;color:var(--text-muted)">${s.progress}%</span>
+        </td>
+        <td style="color:var(--text-muted);font-size:11.5px">${escapeHtml(s.last)}</td>
+      </tr>
+    `;
+  }).join('');
+  void C;
+}
+
+/* ---------------------------------------------------------------------------
+   Facturas
+   --------------------------------------------------------------------------- */
+const INVOICES = [
+  { kind: 'A', num: '00003-00001251', client: 'Distribuidora Norte SA',  cuit: '30-71234567-4', cae: '75239184720193', total: 1284500, status: 'authorized' },
+  { kind: 'B', num: '00003-00001252', client: 'Martín Sosa',             cuit: '20-34567890-1', cae: '75239184720194', total: 98400,   status: 'authorized' },
+  { kind: 'A', num: '00003-00001253', client: 'Supermercados del Sur',   cuit: '30-65432109-8', cae: '75239184720195', total: 3420800, status: 'authorized' },
+  { kind: 'B', num: '00003-00001254', client: 'Lucía Fernández',         cuit: '27-29876543-6', cae: null,             total: 156700,  status: 'queued' },
+  { kind: 'C', num: '00003-00001255', client: 'Consumidor Final',        cuit: null,            cae: '75239184720196', total: 42300,   status: 'authorized' },
+  { kind: 'NC-A', num: '00003-00000089', client: 'Distribuidora Norte SA', cuit: '30-71234567-4', cae: '75239184720197', total: -128400, status: 'authorized' },
+];
+
+function renderInvoices() {
+  document.getElementById('invoiceTable').innerHTML = INVOICES.map((inv) => {
+    const isNC = inv.kind.startsWith('NC');
+    const pill = inv.status === 'authorized' ? 'ok' : inv.status === 'queued' ? 'warn' : 'danger';
+    const label = inv.status === 'authorized' ? 'Autorizado' : inv.status === 'queued' ? 'En cola' : 'Rechazado';
+
+    return `
+      <tr>
+        <td>
+          <span class="strong">${isNC ? 'NC ' : ''}${inv.kind.replace('NC-', '')} ${escapeHtml(inv.num.split('-')[1])}</span>
+          <div style="font-size:10.5px;color:var(--text-muted)">Pto. ${escapeHtml(inv.num.split('-')[0])}</div>
+        </td>
+        <td>
+          <div style="color:var(--text-primary);font-size:12px">${escapeHtml(inv.client)}</div>
+          <div style="font-size:10.5px;color:var(--text-muted)">${inv.cuit ? 'CUIT ' + escapeHtml(inv.cuit) : 'Consumidor final'}</div>
+        </td>
+        <td style="font-variant-numeric:tabular-nums;font-size:11.5px;color:${inv.cae ? 'var(--text-secondary)' : 'var(--text-muted)'}">
+          ${inv.cae ? escapeHtml(inv.cae) : '—'}
+        </td>
+        <td class="num strong" style="color:${inv.total < 0 ? 'var(--danger)' : 'var(--text-primary)'}">
+          ${money(inv.total)}
+        </td>
+        <td><span class="pill ${pill}">${label}</span></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+/* ---------------------------------------------------------------------------
+   Selector de plantillas
+   --------------------------------------------------------------------------- */
+function renderTemplatePicker(activeKey) {
+  document.getElementById('templatePicker').innerHTML = TEMPLATES.map((t) => `
+    <button class="template-card ${t.key === activeKey ? 'active' : ''}" data-template="${t.key}">
+      <div class="preview-mini" style="color:var(--brand-primary)">
+        <div class="pm-side"></div>
+        <div class="pm-body">
+          <div class="pm-bar accent" style="width:60%"></div>
+          <div class="pm-row">
+            <div class="pm-cell"></div><div class="pm-cell"></div><div class="pm-cell"></div>
+          </div>
+        </div>
+      </div>
+      <div class="template-name">${escapeHtml(t.name)}</div>
+      <div class="template-desc">${escapeHtml(t.desc)}</div>
+    </button>
+  `).join('');
+
+  document.querySelectorAll('[data-template]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.template;
+      const tpl = TEMPLATES.find((t) => t.key === key);
+      const current = currentTenant();
+      current.template = key;
+      // La plantilla arrastra su densidad y, si el rubro es de logística,
+      // prioriza el panel de torre de control.
+      current.density = (key === 'logistics-glass' || key === 'distributor-glass') ? 'compact' : 'comfy';
+      applyBrand(current);
+      renderKpis(current);
+      renderSalesChart(salesState.days);
+      renderCategoryChart(current.categories);
+      renderMap();
+      toast('ok', 'Plantilla aplicada', `${tpl.name} · densidad ${current.density === 'compact' ? 'compacta' : 'cómoda'}`);
+    });
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   Cambio de empresa
+   --------------------------------------------------------------------------- */
+let activeTenantId = TENANTS[0].id;
+const currentTenant = () => TENANTS.find((t) => t.id === activeTenantId);
+
+function renderTenantMenu() {
+  const menu = document.getElementById('tenantMenu');
+  menu.innerHTML = `
+    <div class="tenant-menu-label">Empresas</div>
+    ${TENANTS.map((t) => `
+      <button class="tenant-option ${t.id === activeTenantId ? 'active' : ''}" data-tenant="${t.id}" role="option"
+              aria-selected="${t.id === activeTenantId}">
+        <span class="swatch" style="background:linear-gradient(135deg,${t.brand.primary},${t.brand.secondary})">
+          ${escapeHtml(t.initials)}
+        </span>
+        <span style="min-width:0;flex:1">
+          <span class="t-name">${escapeHtml(t.name)}</span>
+          <span class="t-role">${escapeHtml(t.role)} · ${escapeHtml(t.meta)}</span>
+        </span>
+        <svg class="check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 6 9 17l-5-5"/>
+        </svg>
+      </button>
+    `).join('')}
+  `;
+
+  menu.querySelectorAll('[data-tenant]').forEach((btn) => {
+    btn.addEventListener('click', () => switchTenant(btn.dataset.tenant));
+  });
+}
+
+function switchTenant(id) {
+  if (id === activeTenantId) { closeTenantMenu(); return; }
+  activeTenantId = id;
+  const t = currentTenant();
+
+  // Transición breve de opacidad: sin esto el cambio de paleta se siente como
+  // un glitch, todos los colores saltan a la vez.
+  const main = document.querySelector('.main');
+  main.style.transition = 'opacity 160ms ease';
+  main.style.opacity = '0.35';
+
+  setTimeout(() => {
+    applyBrand(t);
+    renderKpis(t);
+    renderSalesChart(salesState.days);
+    renderCategoryChart(t.categories);
+    renderMap();
+    renderShipments();
+    renderInvoices();
+    renderLowStock();
+    renderTenantMenu();
+    main.style.opacity = '1';
+  }, 160);
+
+  closeTenantMenu();
+  toast('info', `Cambiando a ${t.name}`, `Rol: ${t.role} · plantilla ${t.template}. El contexto de sesión se revalida contra la membresía.`);
+}
+
+function openTenantMenu() {
+  document.getElementById('tenantMenu').classList.add('open');
+  document.getElementById('tenantSwitcher').setAttribute('aria-expanded', 'true');
+}
+function closeTenantMenu() {
+  document.getElementById('tenantMenu').classList.remove('open');
+  document.getElementById('tenantSwitcher').setAttribute('aria-expanded', 'false');
+}
+
+/* ---------------------------------------------------------------------------
+   Toasts
+   --------------------------------------------------------------------------- */
+const TOAST_ICONS = {
+  ok:   '<path d="M20 6 9 17l-5-5"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  warn: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
+};
+
+function toast(kind, title, msg) {
+  const stack = document.getElementById('toastStack');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `
+    <div class="toast-icon ${kind}">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${TOAST_ICONS[kind]}</svg>
+    </div>
+    <div style="min-width:0;flex:1">
+      <div class="toast-title">${escapeHtml(title)}</div>
+      <div class="toast-msg">${escapeHtml(msg)}</div>
+    </div>
+  `;
+  stack.appendChild(el);
+
+  setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 300);
+  }, 4200);
+}
+
+/* ---------------------------------------------------------------------------
+   Simulación de eventos en vivo
+   --------------------------------------------------------------------------- */
+const EVENT_TEMPLATES = [
+  { status: 'in_transit',       code: 'at_hub',            desc: 'Arribó al centro de distribución',        pill: 'info' },
+  { status: 'out_for_delivery', code: 'out_for_delivery',  desc: 'Salió a reparto · última milla',          pill: 'info' },
+  { status: 'delivered',        code: 'delivered',         desc: 'Entregado · firma del cliente registrada', pill: 'ok' },
+  { status: 'incident',         code: 'incident',          desc: 'Incidencia: destinatario ausente',        pill: 'danger' },
+];
+
+let simulationTimer = null;
+
+function simulateEvent() {
+  const candidates = SHIPMENTS.filter((s) => s.status !== 'delivered' && s.status !== 'cancelled');
+  if (candidates.length === 0) {
+    toast('warn', 'Sin envíos activos', 'Todos los envíos están entregados o cancelados.');
+    return;
+  }
+  const shipment = candidates[Math.floor(Math.random() * candidates.length)];
+  const evt = EVENT_TEMPLATES[Math.floor(Math.random() * EVENT_TEMPLATES.length)];
+
+  // Máquina de estados mínima: sólo transiciones plausibles.
+  const allowed = {
+    preparing: ['in_transit'],
+    ready: ['in_transit', 'out_for_delivery'],
+    in_transit: ['out_for_delivery', 'delivered', 'incident'],
+    out_for_delivery: ['delivered', 'incident'],
+    incident: ['in_transit'],
+    delivered: [],
+    cancelled: [],
+  };
+  if (!allowed[shipment.status].includes(evt.status)) {
+    shipment.status = allowed[shipment.status][0];
+  } else {
+    shipment.status = evt.status;
+  }
+
+  shipment.last = evt.desc;
+  shipment.progress = shipment.status === 'delivered'
+    ? 100
+    : Math.min(96, shipment.progress + Math.round(8 + Math.random() * 22));
+
+  renderShipments();
+  renderMap();
+
+  const meta = STATUS_META[shipment.status];
+  toast(
+    evt.pill === 'danger' ? 'warn' : evt.pill === 'ok' ? 'ok' : 'info',
+    `${shipment.code} · ${meta.label}`,
+    `${evt.desc} — ${shipment.dest}. Evento publicado por el canal SSE del tenant.`,
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   Vistas
+   --------------------------------------------------------------------------- */
+const VIEW_META = {
+  dashboard: { title: 'Panel general', sub: 'Viernes 18 de septiembre, 2026 · datos en vivo' },
+  sales:     { title: 'Ventas',        sub: 'Órdenes, cobranzas y desempeño comercial' },
+  billing:   { title: 'Facturación AFIP', sub: 'Comprobantes electrónicos · WSFE' },
+  catalog:   { title: 'Catálogo',      sub: 'Productos, variantes y listas de precios' },
+  stock:     { title: 'Stock multidéposito', sub: 'Trazabilidad de movimientos e inventario' },
+  shipping:  { title: 'Envíos y tracking', sub: 'Torre de control logística' },
+  branding:  { title: 'Identidad y plantillas', sub: 'Whitelabel por empresa' },
+  team:      { title: 'Equipo y roles', sub: 'Miembros, roles RBAC y permisos' },
+};
+
+/* ---------------------------------------------------------------------------
+   Inicialización
+   --------------------------------------------------------------------------- */
+function init() {
+  const t = currentTenant();
+  applyBrand(t);
+  renderTenantMenu();
+  renderKpis(t);
+  renderSalesChart(30);
+  renderCategoryChart(t.categories);
+  renderLowStock();
+  renderMap();
+  renderShipments();
+  renderInvoices();
+
+  // --- Switcher de empresa ---
+  document.getElementById('tenantSwitcher').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = document.getElementById('tenantMenu');
+    menu.classList.contains('open') ? closeTenantMenu() : openTenantMenu();
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#tenantSwitcher') && !e.target.closest('#tenantMenu')) closeTenantMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeTenantMenu();
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      document.getElementById('globalSearch').focus();
+    }
+  });
+
+  // --- Rango del gráfico de ventas ---
+  document.querySelectorAll('[data-chart-range="sales"] button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-chart-range="sales"] button')
+        .forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const days = Number(btn.dataset.range);
+      renderSalesChart(days);
+      document.getElementById('salesSub').textContent =
+        `Últimos ${days} días · facturado vs. cobrado`;
+    });
+  });
+
+  // --- Navegación ---
+  document.querySelectorAll('.nav-item').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
+      item.classList.add('active');
+      const view = item.dataset.view;
+      const meta = VIEW_META[view];
+      if (meta) {
+        document.getElementById('viewTitle').textContent = meta.title;
+        document.getElementById('viewSubtitle').textContent = meta.sub;
+      }
+      closeMobileSidebar();
+    });
+  });
+
+  // --- Sidebar móvil ---
+  const sidebar = document.getElementById('sidebar');
+  const scrim = document.getElementById('scrim');
+  document.getElementById('mobileToggle').addEventListener('click', () => {
+    sidebar.classList.add('open');
+    scrim.classList.add('show');
+  });
+  scrim.addEventListener('click', closeMobileSidebar);
+  function closeMobileSidebar() {
+    sidebar.classList.remove('open');
+    scrim.classList.remove('show');
+  }
+
+  // --- Simulación en vivo ---
+  document.getElementById('simulateBtn').addEventListener('click', simulateEvent);
+  simulationTimer = setInterval(simulateEvent, 9000);
+
+  // --- Exportaciones ---
+  document.getElementById('exportBtn').addEventListener('click', () => exportReport('xlsx'));
+  document.getElementById('exportXlsxBtn').addEventListener('click', () => exportReport('xlsx'));
+  document.getElementById('exportPdfBtn').addEventListener('click', () => exportReport('pdf'));
+
+  // --- Notificaciones ---
+  document.getElementById('notifBtn').addEventListener('click', () => {
+    const t2 = currentTenant();
+    toast('info', 'Notificaciones', `${t2.kpis.lowStockAlerts} alertas de stock y ${t2.kpis.pendingInvoices} comprobantes pendientes de CAE.`);
+  });
+
+  // --- Búsqueda ---
+  document.getElementById('globalSearch').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const q = e.target.value.trim();
+      if (!q) return;
+      toast('info', 'Búsqueda', `Consultando "${q}" dentro del tenant activo. RLS restringe el alcance a ${currentTenant().name}.`);
+    }
+  });
+
+  // Re-render ante cambios de tamaño: los SVG usan coordenadas fijas
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      renderSalesChart(salesState.days);
+      renderCategoryChart(currentTenant().categories);
+      renderMap();
+    }, 180);
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   Exportación con identidad dinámica
+   --------------------------------------------------------------------------- */
+function exportReport(format) {
+  const t = currentTenant();
+  const btn = format === 'pdf'
+    ? document.getElementById('exportPdfBtn')
+    : document.getElementById('exportXlsxBtn');
+
+  btn.disabled = true;
+  const original = btn.innerHTML;
+  btn.innerHTML = `
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+         stroke-linecap="round" style="animation:spin 800ms linear infinite">
+      <path d="M21 12a9 9 0 1 1-6.2-8.6"/>
+    </svg>
+    Generando…
+  `;
+
+  // En la app real: POST /api/v1/reports/export con el tenant de la SESIÓN.
+  // El backend resuelve app.tenant_branding y aplica el tema.
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.innerHTML = original;
+    toast('ok',
+      `${format.toUpperCase()} generado`,
+      `Reporte de ${t.name} con su identidad: ${t.brand.primary} / ${t.brand.secondary}. El servidor resolvió la marca desde tenant_branding.`,
+    );
+  }, 1400);
+}
+
+// Keyframe del spinner (inyectado una vez)
+const styleEl = document.createElement('style');
+styleEl.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+document.head.appendChild(styleEl);
+
+init();
+</script>
+</body>
+</html>
