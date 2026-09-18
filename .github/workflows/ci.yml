@@ -220,6 +220,67 @@ jobs:
         run: node tests/isolation/run.mjs --verbose
 
   # ---------------------------------------------------------------------------
+  # 3bis · Invariantes del núcleo contable (puerta de salida de E1).
+  #
+  #        La migración 0012 declara garantías en el ADR 0001: partida doble
+  #        aplicada por el motor, período cerrado inmutable, saldos que no
+  #        mienten, aislamiento contable. Este job verifica que el motor las
+  #        aplique de verdad, escribiendo por INSERT directo —saltando
+  #        post_entry()— porque la pregunta que importa no es "¿la función
+  #        valida?" sino "¿un camino que se saltee la función puede escribir
+  #        un dato inválido?".
+  #
+  #        Corre con el mismo rol de aplicación que el job de aislamiento: la
+  #        suite aborta con exit 2 si detecta un rol privilegiado, porque el
+  #        superusuario ignora RLS y podría escribir la plantilla contable
+  #        salteando la política restrictiva.
+  #
+  #        No necesita preparar el escenario a mano: crea y destruye sus
+  #        propias empresas. Eso la hace independiente del seed.
+  # ---------------------------------------------------------------------------
+  accounting:
+    name: Invariantes contables
+    runs-on: ubuntu-latest
+    needs: migrations
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+      DATABASE_URL: postgres://app_login:AppL0gin!@localhost:5432/control_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Preparar esquema
+        run: |
+          set -euo pipefail
+          for f in $(ls db/migrations/*.sql | sort); do
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+
+      - name: Crear el rol de aplicación
+        run: |
+          set -euo pipefail
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE app_login LOGIN PASSWORD 'AppL0gin!' NOBYPASSRLS IN ROLE control_app;"
+
+      - name: Ejecutar invariantes contables
+        run: node tests/accounting/run.mjs --verbose
+
+  # ---------------------------------------------------------------------------
   # 4 · TypeScript de la API.
   #
   #     Existía un job "probe" que salteaba todo si no encontraba `package.json`
