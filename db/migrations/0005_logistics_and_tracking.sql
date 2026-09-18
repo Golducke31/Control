@@ -42,6 +42,16 @@ CREATE TABLE logistics.vehicles (
   updated_at    timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT vehicles_plate_unique UNIQUE (tenant_id, plate),
+  -- Necesaria para que otras tablas puedan referenciar este vehículo con una FK
+  -- COMPUESTA (tenant_id, id). PostgreSQL exige que las columnas referidas tengan
+  -- una restricción única que las cubra exactamente; sin esto, la FK de
+  -- `shipments` falla con «no hay restricción unique que coincida con las
+  -- columnas dadas».
+  --
+  -- Es la pieza que hace que el aislamiento sea estructural: una FK simple a
+  -- `vehicles(id)` permitiría que un envío de la empresa A apuntara a un vehículo
+  -- de la empresa B. Con la FK compuesta, el motor lo rechaza.
+  CONSTRAINT vehicles_id_tenant    UNIQUE (tenant_id, id),
   CONSTRAINT vehicles_carrier_fk   FOREIGN KEY (tenant_id, carrier_id) REFERENCES logistics.carriers(tenant_id, id) ON DELETE CASCADE
 );
 

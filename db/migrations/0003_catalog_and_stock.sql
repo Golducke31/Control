@@ -38,8 +38,14 @@ CREATE TABLE app.customers (
 );
 
 CREATE UNIQUE INDEX uq_customers_code ON app.customers(tenant_id, code);
+-- Búsqueda de clientes por similitud de nombre. `gin_trgm_ops` va pegado al
+-- nombre de la columna, SIN paréntesis: los paréntesis declaran una expresión, y
+-- dentro de una expresión no se puede asociar una clase de operador a una
+-- columna. Con `(legal_name gin_trgm_ops)` PostgreSQL responde «error de sintaxis
+-- en o cerca de gin_trgm_ops», un mensaje que no menciona ni la extensión ni el
+-- paréntesis de más.
 CREATE INDEX idx_customers_tenant_search
-  ON app.customers USING gin (tenant_id, (legal_name gin_trgm_ops));
+  ON app.customers USING gin (tenant_id, legal_name gin_trgm_ops);
 
 CREATE TRIGGER trg_customers_touch BEFORE UPDATE ON app.customers
   FOR EACH ROW EXECUTE FUNCTION app.touch_updated_at();

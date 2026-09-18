@@ -112,6 +112,34 @@ CREATE TRIGGER trg_users_touch BEFORE UPDATE ON app.users
   FOR EACH ROW EXECUTE FUNCTION app.touch_updated_at();
 
 -- -----------------------------------------------------------------------------
+-- RBAC · roles
+--
+-- Va ANTES de `memberships`, y no por gusto de orden: `memberships.role_id`
+-- referencia `app.roles(id)`. PostgreSQL exige que la tabla referenciada exista
+-- al momento de crear la clave foránea — no admite referencias hacia adelante.
+-- Con `memberships` primero, la migración fallaba con
+-- «no existe la relación «app.roles»».
+-- -----------------------------------------------------------------------------
+CREATE TABLE app.roles (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- NULL => rol de sistema, compartido por todas las empresas
+  tenant_id   uuid REFERENCES app.tenants(id) ON DELETE CASCADE,
+  code        text NOT NULL,
+  name        text NOT NULL,
+  description text,
+  is_system   boolean NOT NULL DEFAULT false,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+
+  -- Un código único por tenant; para roles de sistema el unique es global
+  CONSTRAINT roles_code_unique UNIQUE NULLS NOT DISTINCT (tenant_id, code)
+);
+COMMENT ON TABLE app.roles IS 'Roles RBAC. tenant_id NULL = rol de sistema (Owner, Admin, ...).';
+
+CREATE TRIGGER trg_roles_touch BEFORE UPDATE ON app.roles
+  FOR EACH ROW EXECUTE FUNCTION app.touch_updated_at();
+
+-- -----------------------------------------------------------------------------
 -- memberships: relación N:N usuario <-> empresa, con rol y alcance
 -- -----------------------------------------------------------------------------
 CREATE TABLE app.memberships (
@@ -140,27 +168,8 @@ CREATE TRIGGER trg_memberships_touch BEFORE UPDATE ON app.memberships
   FOR EACH ROW EXECUTE FUNCTION app.touch_updated_at();
 
 -- -----------------------------------------------------------------------------
--- RBAC
+-- RBAC · permisos
 -- -----------------------------------------------------------------------------
-CREATE TABLE app.roles (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  -- NULL => rol de sistema, compartido por todas las empresas
-  tenant_id   uuid REFERENCES app.tenants(id) ON DELETE CASCADE,
-  code        text NOT NULL,
-  name        text NOT NULL,
-  description text,
-  is_system   boolean NOT NULL DEFAULT false,
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  updated_at  timestamptz NOT NULL DEFAULT now(),
-
-  -- Un código único por tenant; para roles de sistema el unique es global
-  CONSTRAINT roles_code_unique UNIQUE NULLS NOT DISTINCT (tenant_id, code)
-);
-COMMENT ON TABLE app.roles IS 'Roles RBAC. tenant_id NULL = rol de sistema (Owner, Admin, ...).';
-
-CREATE TRIGGER trg_roles_touch BEFORE UPDATE ON app.roles
-  FOR EACH ROW EXECUTE FUNCTION app.touch_updated_at();
-
 CREATE TABLE app.permissions (
   code        text PRIMARY KEY,          -- 'inventory.transfer', 'billing.issue_invoice'
   resource    text NOT NULL,             -- 'inventory'

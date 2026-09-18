@@ -56,10 +56,87 @@
  * =============================================================================
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 
-const run = promisify(execFile);
+/**
+ * Ejecuta un proceso con entrada estándar y captura de salida.
+ *
+ * Se usa `spawn` en vez de `execFile` porque el SQL se envía por STDIN (ver
+ * `sql()`), y `execFile` no expone stdin: acepta una opción `input` que
+ * **ignora en silencio**. El resultado no era "sin entrada" sino un proceso
+ * esperando una entrada que nunca llegaba, que el entorno terminaba matando con
+ * SIGTERM — otra vez sin mensaje.
+ *
+ * Rechaza si el proceso sale con código distinto de cero, para que el llamador
+ * pueda ver stderr tal como venía haciendo.
+ */
+function spawnPsql(args, { env, input }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PSQL, args, { env, windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (d) => {
+      stdout += d.toString('utf8');
+    });
+    child.stderr.on('data', (d) => {
+      stderr += d.toString('utf8');
+    });
+
+    child.on('error', (e) => {
+      reject(Object.assign(new Error(e.message), { stderr: e.message, stdout: '' }));
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(
+          Object.assign(new Error(`psql salió con código ${code}`), { stdout, stderr, code })
+        );
+      }
+    });
+
+    // `end()` y no `write()`: sin cerrar stdin, psql espera más sentencias y
+    // nunca llega a ejecutar las que ya recibió.
+    child.stdin.end(input, 'utf8');
+  });
+}
+
+/**
+ * Ruta al ejecutable de psql.
+ *
+ * `execFile` no usa el PATH del shell: hereda el del proceso. En Windows, una
+ * consola que no pasó por el instalador de PostgreSQL no tiene
+ * `C:\Program Files\PostgreSQL\16\bin` en el PATH, y el error resultante
+ * («spawn psql ENOENT») no dice dónde se esperaba encontrarlo.
+ *
+ * Se respeta la variable `PG_BIN` cuando está definida — el mismo nombre que
+ * usa `scripts/verify-isolation.ps1` — para que los dos caminos de verificación
+ * se configuren igual.
+ */
+const PSQL = process.env.PG_BIN
+  ? join(process.env.PG_BIN, process.platform === 'win32' ? 'psql.exe' : 'psql')
+  : 'psql';
+
+/**
+ * Interpreta el texto con que psql representa un boolean.
+ *
+ * psql no tiene una sola forma de escribirlos: con la salida alineada clásica
+ * usa `t`/`f`, y con `--no-align` —las banderas que usa esta suite— usa
+ * `true`/`false`. La versión anterior de la suite comparaba contra `'t'` en
+ * varios lugares, así que con su propia configuración todas esas comparaciones
+ * daban falso. El síntoma era peor que un error: la cobertura reportaba 17
+ * tablas "sin FORCE RLS" que en realidad lo tenían, y la guardia de rol
+ * abortaba un entorno válido. Un falso negativo masivo hace que uno deje de
+ * creerle a la suite.
+ *
+ * Se usa `::text` en el SQL y esta función al leer, para que el formato de
+ * salida no sea parte del contrato.
+ */
+const isTrue = (v) =>
+  typeof v === 'string' && (v.trim() === 't' || v.trim() === 'true');
 
 // -----------------------------------------------------------------------------
 // Configuración
@@ -118,6 +195,45 @@ let passCount = 0;
 const failures = [];
 
 /**
+ * Traduce un DSN `postgres://usuario:clave@host:puerto/base` a los argumentos y
+ * las variables de entorno que psql espera.
+ *
+ * POR QUÉ NO SE PASA EL DSN COMO ARGUMENTO
+ *
+ * La versión anterior invocaba `psql <dsn> --no-psqlrc ...`, con la cadena de
+ * conexión en la PRIMERA posición. En este entorno esa forma mata el proceso
+ * hijo con SIGTERM y —lo peor— **sin ningún mensaje**: ni stdout, ni stderr, ni
+ * código de error. La suite entera terminaba en silencio, indistinguible de un
+ * cuelgue. Se reprodujo aislado: `execFile('psql', ['--version'])` funciona;
+ * `execFile('psql', ['postgres://…', …])` muere.
+ *
+ * Descomponer el DSN evita el argumento con forma de URL y, de paso, saca la
+ * contraseña de la línea de comandos: `psql` la toma de PGPASSWORD, así que no
+ * queda visible en el listado de procesos del equipo.
+ */
+function splitDsn(dsn) {
+  let u;
+  try {
+    u = new URL(dsn);
+  } catch {
+    throw new Error(
+      `DSN inválido: no se pudo interpretar como URL.\n` +
+        `  Formato esperado: postgres://usuario:clave@host:puerto/base`
+    );
+  }
+  return {
+    user: decodeURIComponent(u.username || ''),
+    password: decodeURIComponent(u.password || ''),
+    host: u.hostname || 'localhost',
+    port: u.port || '5432',
+    database: decodeURIComponent(u.pathname.replace(/^\//, '') || ''),
+  };
+}
+
+const APP_CONN = splitDsn(DSN);
+const ADMIN_CONN = splitDsn(ADMIN_DSN);
+
+/**
  * Ejecuta SQL como una transacción única y devuelve stdout crudo.
  * Cada consulta va en su propia transacción para que `SET LOCAL` tenga el
  * alcance correcto — igual que hace la aplicación en producción.
@@ -126,21 +242,38 @@ const failures = [];
  * qué está probando la suite. Ver el encabezado.
  */
 async function sql(statements, { asAdmin = false } = {}) {
-  const script = ['\\set ON_ERROR_STOP on', statements].join('\n');
-  const { stdout } = await run(
-    'psql',
+  const conn = asAdmin ? ADMIN_CONN : APP_CONN;
+  const { stdout } = await spawnPsql(
     [
-      asAdmin ? ADMIN_DSN : DSN,
+      '-U', conn.user,
+      '-h', conn.host,
+      '-p', conn.port,
+      '-d', conn.database,
       '--no-psqlrc',
       '--quiet',
       '--tuples-only',
       '--no-align',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-c',
-      script,
+      '-v', 'ON_ERROR_STOP=1',
+      // La sentencia va por STDIN, no por `-c`.
+      //
+      // En Windows el SQL viaja como argumento de línea de comandos, que usa la
+      // página de códigos ANSI del sistema (cp1252 en español) y no UTF-8. Los
+      // comentarios del proyecto están en español, así que cualquier `á`, `é` o
+      // `ñ` llegaba a PostgreSQL como bytes inválidos y la consulta moría con
+      // «secuencia de bytes no válida para codificación UTF8: 0xe1 0x20 0x65».
+      // Por stdin los bytes se transmiten tal cual, sin pasar por el parser de
+      // argumentos del sistema operativo.
+      '-f', '-',
     ],
-    { maxBuffer: 32 * 1024 * 1024 }
+    {
+      env: Object.assign({}, process.env, {
+        PGPASSWORD: conn.password,
+        // Explicitar la codificación del cliente: sin esto psql deduce la de la
+        // consola, que en Windows suele ser distinta de la de la base.
+        PGCLIENTENCODING: 'UTF8',
+      }),
+      input: statements,
+    }
   );
   return stdout.trim();
 }
@@ -341,8 +474,13 @@ const PROJECT_SCHEMA_PREDICATE = `
 `;
 
 async function discoverTables() {
+  // `::text` en cada booleano: con las banderas que usa esta suite
+  // (`--tuples-only --no-align`), PostgreSQL 16 los renderiza `true`/`false`,
+  // no `t`/`f`. Comparar contra `'t'` daba falso SIEMPRE y la suite reportaba
+  // que ninguna tabla tiene FORCE RLS — un falso negativo masivo que habría
+  // mandado a "arreglar" 17 tablas que ya estaban correctas.
   const out = await sql(`
-SELECT n.nspname || '.' || c.relname || '|' || c.relrowsecurity || '|' || c.relforcerowsecurity
+SELECT n.nspname || '.' || c.relname || '|' || c.relrowsecurity::text || '|' || c.relforcerowsecurity::text
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_attribute a ON a.attrelid = c.oid
@@ -359,7 +497,7 @@ ORDER BY 1;
     .map((line) => {
       const [fq, enabled, forced] = line.split('|');
       const [schema, table] = fq.split('.');
-      return { schema, table, fq, enabled: enabled === 't', forced: forced === 't' };
+      return { schema, table, fq, enabled: isTrue(enabled), forced: isTrue(forced) };
     });
 }
 
@@ -412,11 +550,13 @@ WHERE p.polrelid = '${t.fq}'::regclass
   // `audit.events` guarda el log encadenado por hash —incluidos los intentos de
   // acceso entre inquilinos—, una partición sin cubrir no es un detalle.
   const parts = await sql(`
-SELECT n.nspname || '.' || c.relname || '|' || c.relforcerowsecurity ||
+SELECT n.nspname || '.' || c.relname || '|' || c.relforcerowsecurity::text ||
        '|' || (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid)
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE c.relispartition AND ${PROJECT_SCHEMA_PREDICATE}
+WHERE c.relispartition
+  AND c.relkind IN ('r', 'p')     -- excluir índices particionados (_pkey, _idx)
+  AND ${PROJECT_SCHEMA_PREDICATE}
 ORDER BY 1;
 `);
 
@@ -426,7 +566,7 @@ ORDER BY 1;
     .filter(Boolean)
     .map((line) => {
       const [fq, forced, pols] = line.split('|');
-      return { fq, forced: forced === 't', pols: Number(pols) };
+      return { fq, forced: isTrue(forced), pols: Number(pols) };
     });
 
   if (partList.length === 0) {
@@ -493,8 +633,18 @@ async function testWriteIsolation(tables) {
   console.log('\n\u25b6 C · Aislamiento de escritura (A no puede escribir en B)');
 
   // C.1 · UPDATE sobre filas ajenas: debe afectar 0 filas, no lanzar error.
+  //
+  // Se acepta también el RECHAZO por privilegio. Hay dos capas que pueden
+  // frenar la escritura —el privilegio de tabla (GRANT) y la política RLS— y
+  // cuál de las dos actúa primero depende de la tabla: las append-only
+  // (`audit.events`, `app.stock_movements`, `logistics.tracking_events`) no
+  // otorgan UPDATE a la aplicación, así que PostgreSQL corta antes de evaluar
+  // RLS. Exigir "0 filas afectadas y sin error" obligaba a OTORGAR un privilegio
+  // que el diseño prohíbe, sólo para poder medir la política de abajo. Un
+  // rechazo por privilegio es una garantía más fuerte que un UPDATE que no
+  // encuentra filas: la escritura no se intentó siquiera.
   for (const t of tables) {
-    const out = await sql(
+    const res = await trySql(
       withTenant(
         TENANT_A,
         `WITH u AS (
@@ -505,16 +655,25 @@ async function testWriteIsolation(tables) {
       )
     );
 
+    if (!res.ok) {
+      assert(
+        /permiso denegado|permission denied/i.test(res.err),
+        `${t.fq}: UPDATE sobre filas de B rechazado`,
+        `Falló por un motivo distinto al esperado: ${res.err}`
+      );
+      continue;
+    }
+
     assert(
-      Number(out) === 0,
+      Number(res.out) === 0,
       `${t.fq}: UPDATE sobre filas de B afecta 0 filas`,
-      `Afectó ${out} filas de otro inquilino.`
+      `Afectó ${res.out} filas de otro inquilino.`
     );
   }
 
-  // C.2 · DELETE sobre filas ajenas: debe afectar 0 filas.
+  // C.2 · DELETE sobre filas ajenas: debe afectar 0 filas o ser rechazado.
   for (const t of tables) {
-    const out = await sql(
+    const res = await trySql(
       withTenant(
         TENANT_A,
         `WITH d AS (
@@ -523,10 +682,19 @@ async function testWriteIsolation(tables) {
       )
     );
 
+    if (!res.ok) {
+      assert(
+        /permiso denegado|permission denied/i.test(res.err),
+        `${t.fq}: DELETE sobre filas de B rechazado`,
+        `Falló por un motivo distinto al esperado: ${res.err}`
+      );
+      continue;
+    }
+
     assert(
-      Number(out) === 0,
+      Number(res.out) === 0,
       `${t.fq}: DELETE sobre filas de B afecta 0 filas`,
-      `Borró ${out} filas de otro inquilino.`
+      `Borró ${res.out} filas de otro inquilino.`
     );
   }
 
@@ -573,20 +741,49 @@ async function testWriteIsolation(tables) {
 
 // =============================================================================
 // D · Fail-closed sin contexto
+//
+// El invariante es: sin contexto de inquilino, la consulta no devuelve NINGUNA
+// fila de NINGUNA empresa. No es lo mismo que "devuelve 0 filas" a secas.
+//
+// `app.roles` rompía esa igualdad sin romper el aislamiento: su `tenant_id` es
+// NULLABLE a propósito, porque los roles de sistema (owner, admin, vendedor…)
+// viven una sola vez y son compartidos. `roles_select` los expone con
+// `tenant_id IS NULL` y son 7 filas legítimas. La versión anterior medía
+// `count(*)` sobre la tabla entera, así que contaba esos 7 roles globales como
+// una fuga — un falso positivo que empujaba a "arreglar" un diseño correcto.
+//
+// La medición correcta cuenta sólo las filas CON inquilino: ésas son las que no
+// deben verse jamás sin contexto. Las filas globales no son de nadie, así que
+// no hay nada que filtrar.
 // =============================================================================
 async function testFailClosed(tables) {
   console.log('\n\u25b6 D · Fail-closed (sin contexto de sesión)');
 
   for (const t of tables) {
-    const out = await sql(
-      withoutTenant(`SELECT count(*) FROM ${t.fq};`)
+    // Filas que pertenecen a un inquilino concreto: deben ser 0 sin contexto.
+    const scoped = await sql(
+      withoutTenant(`SELECT count(*) FROM ${t.fq} WHERE tenant_id IS NOT NULL;`)
     );
 
     assert(
-      Number(out) === 0,
-      `${t.fq}: sin contexto devuelve 0 filas`,
-      `Devolvió ${out} filas sin contexto de inquilino — el sistema no es fail-closed.`
+      Number(scoped) === 0,
+      `${t.fq}: sin contexto no expone filas de ningún inquilino`,
+      `Devolvió ${scoped} filas con tenant_id — el sistema no es fail-closed.`
     );
+
+    // Y de paso: si la tabla tiene filas globales, que se sepa. No es un fallo
+    // —hay tablas cuyo tenant_id es anulable por diseño— pero deja constancia
+    // de qué se está viendo sin contexto y por qué no cuenta como fuga.
+    const global = await sql(
+      withoutTenant(`SELECT count(*) FROM ${t.fq} WHERE tenant_id IS NULL;`)
+    );
+
+    if (Number(global) > 0) {
+      console.log(
+        `  · ${t.fq}: ${global} fila(s) global(es) visibles sin contexto ` +
+          '(tenant_id NULL por diseño: catálogo compartido)'
+      );
+    }
   }
 
   // `SET` sin `LOCAL` sobrevive al COMMIT y contamina la conexión siguiente.
@@ -760,24 +957,39 @@ COMMIT;
   });
   assert(health.ok, 'ops.v_job_health es consultable', health.err || '');
 
-  // F.8 · Cerrar una ejecución es idempotente: no debe resucitar ni fallar.
+  // F.8 · Cerrar una ejecución deja la fila cerrada, no colgada.
+  //
+  // `finish_job_run` devuelve `void`: `SELECT` sobre ella da una celda VACÍA, no
+  // una fila con datos. La versión anterior de esta prueba afirmaba
+  // `closed !== ''` sobre ese vacío, así que **nunca podía pasar** — un defecto
+  // de la prueba, no del código. Lo que hay que verificar es el efecto sobre la
+  // fila: que pase de `running` a `succeeded` y que `finished_at` quede puesto.
+  // Un ledger que dice "corrió" pero deja la fila abierta bloquea el job para
+  // siempre, que es justo lo que el índice único parcial castiga.
   await sqlAdmin(`
 BEGIN;
 INSERT INTO ops.job_runs (job_code, status) VALUES ('partition.retention', 'running');
 COMMIT;
 `);
 
-  const closed = await sqlAdmin(`
+  await sqlAdmin(`
 BEGIN;
 SELECT ops.finish_job_run(id, true, '{}'::jsonb, NULL) FROM ops.job_runs
 WHERE job_code = 'partition.retention' AND status = 'running';
 COMMIT;
 `);
 
+  const closedState = await sqlAdmin(`
+SELECT status || '|' || (finished_at IS NOT NULL)::text FROM ops.job_runs
+WHERE job_code = 'partition.retention'
+ORDER BY id DESC LIMIT 1;
+`);
+
   assert(
-    closed !== '',
+    closedState === 'succeeded|true',
     'finish_job_run cerró la ejecución viva',
-    'Cerró 0 filas: la ejecución insertada no fue encontrada.'
+    `La fila quedó en "${closedState}" (esperado "succeeded|true"): ` +
+      'la ejecución no se cerró y el job quedaría bloqueado.'
   );
 
   // Segunda pasada: ya no hay filas en 'running', así que el SELECT no devuelve
@@ -835,12 +1047,21 @@ COMMIT;
 async function assertAppRole() {
   console.log('\n\u25b6 Guardia de rol (la suite debe correr como rol de aplicación)');
 
+  // `::text` en cada booleano en vez de confiar en cómo psql lo formatee.
+  //
+  // Con `--no-align`, PostgreSQL 16 renderiza un boolean como `true`/`false`;
+  // con la salida alineada clásica, como `t`/`f`. La versión anterior comparaba
+  // contra `'t'`, así que con las banderas que realmente usa esta suite
+  // (`--tuples-only --no-align`) la comparación daba siempre falsa y la guardia
+  // abortaba un entorno perfectamente válido. El mensaje culpaba a la
+  // membresía del rol, que estaba bien: el defecto era de formato, no de
+  // permisos. Castear en el SQL elimina la dependencia del formato de psql.
   const row = await sql(`
 SELECT current_user
-     || '|' || (rolsuper OR rolbypassrls)
-     || '|' || EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolcanlogin)
-     || '|' || pg_has_role(current_user, 'control_app', 'MEMBER')
-     || '|' || (SELECT count(*) FROM pg_roles WHERE rolname = 'control_app')
+     || '|' || (rolsuper OR rolbypassrls)::text
+     || '|' || EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolcanlogin)::text
+     || '|' || pg_has_role(current_user, 'control_app', 'MEMBER')::text
+     || '|' || (SELECT count(*) FROM pg_roles WHERE rolname = 'control_app')::text
 FROM pg_roles
 WHERE rolname = current_user;
 `);
@@ -855,7 +1076,7 @@ WHERE rolname = current_user;
     process.exit(2);
   }
 
-  if (privileged === 't') {
+  if (isTrue(privileged)) {
     console.error(
       `\n  ABORTADO: la suite se conectó como \`${user}\`, que es superusuario o\n` +
         `  tiene BYPASSRLS.\n\n` +
@@ -869,7 +1090,7 @@ WHERE rolname = current_user;
     process.exit(2);
   }
 
-  if (isMember !== 't') {
+  if (!isTrue(isMember)) {
     console.error(
       `\n  ABORTADO: el rol \`${user}\` no es miembro de \`control_app\`.\n\n` +
         `  La suite necesita los privilegios de ese rol para ejercitar las\n` +
@@ -882,7 +1103,7 @@ WHERE rolname = current_user;
     process.exit(2);
   }
 
-  if (canLogin !== 't') {
+  if (!isTrue(canLogin)) {
     console.warn(
       `  Aviso: \`${user}\` no tiene LOGIN pero la conexión funcionó (¿SET ROLE desde psqlrc?).`
     );

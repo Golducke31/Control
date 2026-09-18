@@ -22,6 +22,12 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";   -- gen_random_uuid(), digest()
 CREATE EXTENSION IF NOT EXISTS "citext";     -- emails / slugs case-insensitive
 CREATE EXTENSION IF NOT EXISTS "btree_gin";  -- índices compuestos GIN
+-- `pg_trgm` provee gin_trgm_ops, que usa el índice de búsqueda de clientes por
+-- nombre en 0003. Sin esta extensión, ese CREATE INDEX falla con «error de
+-- sintaxis en o cerca de gin_trgm_ops» — un mensaje que no menciona la
+-- extensión y cuesta asociar. Debe declararse acá, donde el proyecto declara
+-- todas sus dependencias, y no en la migración que la usa primero.
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";    -- gin_trgm_ops (búsqueda por similitud)
 
 -- -----------------------------------------------------------------------------
 -- Schemas

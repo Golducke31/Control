@@ -70,6 +70,14 @@ violations AS (
 
   -- 3. Política permisiva incondicional: el conteo no la delata, hay que mirar
   --    la expresión. Una PERMISSIVE con USING (true) abre la tabla entera.
+  --
+  --    Sólo se evalúa donde `USING (true)` ES un defecto: tablas CON tenant_id.
+  --    En un catálogo global sin tenant_id (`app.permissions`) una política de
+  --    lectura `USING (true)` es el diseño correcto — el catálogo es el mismo
+  --    para todas las empresas y no hay nada que aislar. Sin esta condición el
+  --    lint reportaba ese caso como violación y, como no se puede "arreglar"
+  --    sin romper el diseño, el ruido permanente termina enseñando a ignorar
+  --    el lint entero. Un control que siempre grita deja de ser un control.
   SELECT n.nspname, c.relname, c.relispartition,
          'politica permisiva con USING (true): ' || p.polname
   FROM pg_policy p
@@ -78,6 +86,13 @@ violations AS (
   WHERE n.nspname IN (SELECT nspname FROM _project_schemas)
     AND p.polpermissive
     AND pg_get_expr(p.polqual, p.polrelid) = 'true'
+    AND EXISTS (
+      SELECT 1 FROM pg_attribute a
+      WHERE a.attrelid = c.oid
+        AND a.attname = 'tenant_id'
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+    )
 
   UNION ALL
 

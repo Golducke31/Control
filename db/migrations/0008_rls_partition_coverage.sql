@@ -52,6 +52,7 @@ DECLARE
   pol      record;
   v_cmd    text;
   v_roles  text;
+  v_using  text;
   v_check  text;
 BEGIN
   -- Se recorre la jerarquía real de particiones con pg_partition_tree() en vez
@@ -94,6 +95,30 @@ BEGIN
 
       v_roles := array_to_string(COALESCE(pol.roles, ARRAY['public']), ', ');
 
+      -- ---------------------------------------------------------------------
+      -- USING y WITH CHECK no son intercambiables, y PostgreSQL los rechaza
+      -- cuando corresponde. La primera versión copiaba siempre
+      -- `USING (COALESCE(using_expr, 'true'))` y agregaba WITH CHECK si había,
+      -- y fallaba con «sólo se permite una expresión WITH CHECK para INSERT».
+      --
+      -- La regla del motor:
+      --   · INSERT  → admite WITH CHECK, NO admite USING.
+      --   · DELETE  → admite USING, NO admite WITH CHECK.
+      --   · SELECT  → admite USING, NO admite WITH CHECK.
+      --   · UPDATE  → admite ambos.
+      --   · ALL     → admite ambos.
+      --
+      -- Por eso la cláusula USING sólo se emite si la política la tenía en el
+      -- padre. Fabricar `USING (true)` para una política de INSERT no es
+      -- inocuo: cambia la semántica que se creía estar copiando y, además,
+      -- es un error de sintaxis en el motor.
+      -- ---------------------------------------------------------------------
+      v_using := CASE
+                   WHEN pol.using_expr IS NOT NULL
+                     THEN format(' USING (%s)', pol.using_expr)
+                   ELSE ''
+                 END;
+
       v_check := CASE
                    WHEN pol.check_expr IS NOT NULL
                      THEN format(' WITH CHECK (%s)', pol.check_expr)
@@ -105,13 +130,13 @@ BEGIN
       EXECUTE format('DROP POLICY IF EXISTS %I ON %s', pol.polname, target);
 
       EXECUTE format(
-        'CREATE POLICY %I ON %s AS %s FOR %s TO %s USING (%s)%s',
+        'CREATE POLICY %I ON %s AS %s FOR %s TO %s%s%s',
         pol.polname,
         target,
         CASE WHEN pol.polpermissive THEN 'PERMISSIVE' ELSE 'RESTRICTIVE' END,
         v_cmd,
         v_roles,
-        COALESCE(pol.using_expr, 'true'),
+        v_using,
         v_check
       );
     END LOOP;
@@ -242,6 +267,14 @@ BEGIN
   -- ---------------------------------------------------------------------------
   -- B · Cada partición debe tener su propia cobertura. Este es el chequeo que
   --     habría detectado el defecto original de audit.events.
+  --
+  -- `relispartition` es true también para los ÍNDICES particionados: un
+  -- `PRIMARY KEY` o un `CREATE INDEX` sobre una tabla particionada aparece en
+  -- `pg_class` como una partición hija (`audit.events_2026_09_pkey`). Sin
+  -- filtrar por `relkind`, la aserción reporta esos índices como «particiones
+  -- sin RLS» — un falso positivo que, al acumularse, entierra el hallazgo real
+  -- bajo una lista de ruido y empuja a desactivar la aserción. Sólo las tablas
+  -- (`r`) y las sub-particiones (`p`) pueden llevar políticas.
   -- ---------------------------------------------------------------------------
   FOR r IN
     SELECT n.nspname AS schema_name, c.relname AS table_name, c.relforcerowsecurity,
@@ -249,6 +282,7 @@ BEGIN
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relispartition
+      AND c.relkind IN ('r', 'p')       -- excluir índices particionados (_pkey, _idx)
       AND n.nspname = ANY (v_schemas)
   LOOP
     IF NOT r.relforcerowsecurity OR r.policy_count = 0 THEN

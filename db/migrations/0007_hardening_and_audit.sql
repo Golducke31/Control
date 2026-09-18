@@ -35,11 +35,33 @@ END $$;
 -- -----------------------------------------------------------------------------
 GRANT USAGE ON SCHEMA app, billing, logistics, audit TO control_app, control_readonly;
 
+-- `audit` faltaba en el grant de `control_app` — DEFECTO CORREGIDO.
+--
+-- El grant original sólo incluía `app, billing, logistics` para el rol de
+-- aplicación y reservaba `audit` a lectura para `control_readonly`. La
+-- consecuencia no era "la app no puede leer la auditoría" (aceptable) sino algo
+-- peor: **la app no puede escribirla**. `audit.events` es donde se registran los
+-- intentos de acceso cruzado entre empresas; con cero privilegios, el INSERT
+-- del log fallaba y la cadena de auditoría quedaba vacía. Un control de
+-- seguridad que no registra nada es indistinguible de un control que no existe,
+-- y el sistema reportaba "OK" porque nadie miraba una tabla que no podía leer.
+--
+-- Se otorga INSERT (y SELECT, para que la app pueda mostrar la auditoría de su
+-- propia empresa — la política `audit_select` ya lo limita). El append-only se
+-- mantiene donde corresponde: los REVOKE de UPDATE/DELETE de abajo, sobre
+-- tablas puntuales.
+GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA audit TO control_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app, billing, logistics TO control_app;
 GRANT SELECT ON ALL TABLES IN SCHEMA app, billing, logistics, audit TO control_readonly;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA app, billing, logistics TO control_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA app, billing, logistics, audit TO control_app;
 
--- El rol de aplicación NO puede tocar el schema audit ni los logs append-only
+-- Novedad: `audit.events` todavía NO existe en este punto del archivo (se crea
+-- más abajo, en la sección de auditoría). El REVOKE de UPDATE/DELETE sobre esa
+-- tabla va allí, después de su CREATE TABLE: un `REVOKE` sobre una relación que
+-- no existe falla con «no existe la relación», mientras que `ALTER DEFAULT
+-- PRIVILEGES` —que sí puede declararse antes— ya deja el default correcto.
+
+-- Logs append-only: la aplicación agrega filas, nunca las corrige.
 REVOKE UPDATE, DELETE ON billing.afip_request_log FROM control_app;
 REVOKE UPDATE, DELETE ON app.stock_movements    FROM control_app;
 REVOKE UPDATE, DELETE ON logistics.tracking_events FROM control_app;
@@ -60,10 +82,20 @@ GRANT EXECUTE ON FUNCTION app.has_permission(text) TO control_app, control_reado
 REVOKE ALL ON FUNCTION app.is_member_of(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.is_member_of(uuid) TO control_app;
 
--- Default privileges para tablas futuras
+-- Default privileges para tablas futuras.
+--
+-- Sin esto, una tabla creada por una migración posterior queda sin grants y el
+-- acceso falla con «permiso denegado» — que se confunde con un problema de RLS.
+-- Los grants directos ya se dieron arriba para lo que existe hoy; esto cubre lo
+-- que se cree después.
 ALTER DEFAULT PRIVILEGES IN SCHEMA app, billing, logistics
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO control_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA app, billing, logistics, audit
+  GRANT USAGE, SELECT ON SEQUENCES TO control_app;
+-- En `audit` la app sólo agrega e lee; el default no otorga UPDATE/DELETE.
 ALTER DEFAULT PRIVILEGES IN SCHEMA audit
+  GRANT SELECT, INSERT ON TABLES TO control_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA app, billing, logistics, audit
   GRANT SELECT ON TABLES TO control_readonly;
 
 -- -----------------------------------------------------------------------------
@@ -96,7 +128,18 @@ REVOKE EXECUTE ON FUNCTION app.set_tenant_context(uuid, uuid, boolean) FROM PUBL
 -- Audit log inmutable (hash chain: cada fila encadena la anterior)
 -- -----------------------------------------------------------------------------
 CREATE TABLE audit.events (
-  id           bigserial PRIMARY KEY,
+  -- La PK incluye `created_at` (la clave de particionamiento), no sólo `id`.
+  -- PostgreSQL exige que toda restricción única en una tabla particionada cubra
+  -- todas las columnas de particionamiento: el índice único se construye por
+  -- partición, y sin la clave de partición no podría garantizar unicidad global.
+  -- Con `id bigserial PRIMARY KEY` a secas, la migración falla con «las
+  -- restricciones unique en tablas particionadas deben incluir todas las
+  -- columnas de particionamiento».
+  --
+  -- `logistics.position_pings` (0005) ya usa PRIMARY KEY (id, recorded_at); acá
+  -- se había omitido. `id` sigue siendo único por sí solo porque es un bigserial
+  -- alimentado por una única secuencia.
+  id           bigserial,
   tenant_id    uuid,
   actor_user_id uuid,
   actor_kind   text NOT NULL DEFAULT 'user',
@@ -113,7 +156,9 @@ CREATE TABLE audit.events (
   -- Encadenamiento criptográfico para detectar manipulación
   prev_hash    text,
   row_hash     text NOT NULL,
-  created_at   timestamptz NOT NULL DEFAULT now()
+  created_at   timestamptz NOT NULL DEFAULT now(),
+
+  PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
 CREATE TABLE audit.events_2026_09 PARTITION OF audit.events
@@ -121,6 +166,27 @@ CREATE TABLE audit.events_2026_09 PARTITION OF audit.events
 CREATE TABLE audit.events_2026_10 PARTITION OF audit.events
   FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');
 CREATE TABLE audit.events_default PARTITION OF audit.events DEFAULT;
+
+-- -----------------------------------------------------------------------------
+-- Grants de `audit.events` — van ACÁ, después del CREATE TABLE.
+--
+-- El bloque de grants del encabezado de esta migración corre antes de que estas
+-- tablas existan: un `GRANT ... ON ALL TABLES IN SCHEMA` sólo alcanza lo que ya
+-- está creado, así que `audit.events` y sus particiones quedaban afuera. El
+-- `ALTER DEFAULT PRIVILEGES` de allá arriba cubre las tablas de migraciones
+-- FUTURAS; éstas se otorgan de forma explícita porque ya existen.
+--
+-- Se otorga a `control_app` (la aplicación) y no sólo a `control_readonly`. La
+-- distinción importa: la app INSERTA eventos de auditoría —es su obligación— y
+-- `control_readonly` sólo los consulta para monitoreo.
+-- -----------------------------------------------------------------------------
+GRANT SELECT, INSERT ON audit.events TO control_app;
+GRANT SELECT ON audit.events TO control_readonly;
+
+-- Append-only: la aplicación agrega filas, no las reescribe ni las borra. Es una
+-- garantía del motor (privilegio), no una convención del código: si un bug
+-- intentara `UPDATE audit.events`, PostgreSQL lo rechaza antes de tocar la fila.
+REVOKE UPDATE, DELETE, TRUNCATE ON audit.events FROM control_app;
 
 CREATE INDEX idx_audit_tenant_time ON audit.events(tenant_id, created_at DESC);
 CREATE INDEX idx_audit_resource    ON audit.events(resource, resource_id);
