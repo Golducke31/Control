@@ -142,6 +142,46 @@ for (const m of allCode.matchAll(
   t.uniques.push(cols);
 }
 
+/**
+ * Restricciones añadidas con `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE`.
+ *
+ * POR QUÉ HACE FALTA ESTE PASO
+ *
+ * Una tabla creada en una migración temprana puede no ser referenciable por clave
+ * compuesta —no declara `UNIQUE (tenant_id, id)`— y una migración posterior
+ * agregárselo. Es el caso real de `billing.payments` (creada en `0004`, que no
+ * podía ser destino de FK compuesta) cuando `0015` la vuelve referenciable.
+ *
+ * Sin esta rama, el validador mira el `CREATE TABLE` de `0004`, no ve el UNIQUE, y
+ * reporta "FALTA UNIQUE" sobre una tabla que ya lo tiene. Es el mismo falso
+ * positivo que motivó la rama de `CREATE UNIQUE INDEX` —y un validador que grita
+ * en falso termina ignorado, que es peor que no tenerlo.
+ *
+ * POR QUÉ SE ANCLA AL `;` Y NO AL SIGUIENTE `ADD CONSTRAINT`
+ *
+ * La primera versión usaba `ALTER TABLE ([\w.]+)[\s\S]*?ADD CONSTRAINT ... UNIQUE`.
+ * El `[\s\S]*?` cruza cualquier cosa hasta el primer `ADD CONSTRAINT ... UNIQUE`
+ * que aparezca, y como la migración tiene varios `ALTER TABLE` seguidos, le
+ * atribuía el UNIQUE a la tabla equivocada: reportaba `billing.invoices` en vez de
+ * `billing.payments`. Anclar cada sentencia a su `;` evita la atribución cruzada.
+ */
+for (const stmt of allCode.split(';')) {
+  for (const m of stmt.matchAll(
+    /ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+|ONLY\s+)?([\w.]+)[\s\S]*?ADD\s+CONSTRAINT\s+[\w"]+\s+UNIQUE\s*\(([^)]*)\)/gi
+  )) {
+    const fq = m[1].toLowerCase();
+    const t = tables.get(fq);
+    if (!t) continue;
+
+    const cols = m[2]
+      .split(',')
+      .map((c) => c.trim().toLowerCase().replace(/"/g, '').split(/\s+/)[0])
+      .filter(Boolean);
+
+    t.uniques.push(cols);
+  }
+}
+
 const covers = (fq, cols) => {
   const t = tables.get(fq);
   if (!t) return true; // Tabla externa a las migraciones: no opinamos.
