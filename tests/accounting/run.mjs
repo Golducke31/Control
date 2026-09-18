@@ -1325,6 +1325,151 @@ FROM pg_class c WHERE c.oid = 'accounting.v_posting_gaps'::regclass;
 }
 
 // =============================================================================
+// Invariante 15 · La reconciliación contable detecta saldos divergentes
+// -----------------------------------------------------------------------------
+// `accounting.account_balances` es una PROYECCIÓN que mantiene `post_entry()`.
+// Su modo de falla no es un error: es una divergencia silenciosa. El libro sigue
+// cuadrando —la partida doble la garantiza el trigger sobre `journal_lines`, no
+// la proyección—, así que un saldo mal escrito no descuadra nada. Simplemente
+// hace que el balance que ve el contador diga un número distinto al del diario.
+//
+// Por eso esta prueba se hace en las dos direcciones, como la de brechas:
+//   1. Con la proyección al día, el job no reporta divergencias.
+//   2. Con la proyección adulterada a mano, el job la DETECTA.
+//
+// La segunda es la que vale. Un job cuya consulta siempre devuelve cero filas
+// pasa la primera sin controlar nada.
+// =============================================================================
+async function testAccountingReconciliation() {
+  console.log('\n\u25b6 Invariante 15 · la reconciliación detecta saldos divergentes');
+
+  // La consulta del job, tal cual corre en `accountingReconciliationJob`. Se
+  // replica acá porque el arnés no ejecuta TypeScript; lo que se prueba es el
+  // SQL, que es lo que puede estar mal.
+  const CONSULTA_DIVERGENCIAS = `
+SELECT count(*)::text
+FROM (
+  WITH ledger AS (
+    SELECT l.tenant_id, l.account_id, e.period_id,
+           COALESCE(sum(l.debit),  0) AS sum_debit,
+           COALESCE(sum(l.credit), 0) AS sum_credit
+    FROM accounting.journal_lines l
+    JOIN accounting.journal_entries e
+      ON e.tenant_id = l.tenant_id AND e.id = l.entry_id
+    GROUP BY l.tenant_id, l.account_id, e.period_id
+  )
+  SELECT b.account_id
+  FROM accounting.account_balances b
+  FULL OUTER JOIN ledger l
+    ON l.tenant_id = b.tenant_id AND l.account_id = b.account_id AND l.period_id = b.period_id
+  WHERE COALESCE(b.period_debit,  0) IS DISTINCT FROM COALESCE(l.sum_debit,  0)
+     OR COALESCE(b.period_credit, 0) IS DISTINCT FROM COALESCE(l.sum_credit, 0)
+) d;
+`;
+
+  // El job tiene que estar registrado con su cadencia. La descripción de la
+  // migración promete que "verifica que los saldos coincidan": sin el registro,
+  // `begin_job_run()` lanza y la promesa no se cumple.
+  const registro = await sqlAdmin(`
+BEGIN;
+SELECT app.set_tenant_context(NULL, NULL, true);
+SELECT count(*)::text FROM ops.jobs
+ WHERE code = 'accounting.reconciliation' AND expected_every = interval '1 day';
+COMMIT;
+`);
+
+  assert(
+    registro === '1',
+    'ops.jobs contiene accounting.reconciliation con cadencia declarada',
+    `Encontrados: ${registro}`
+  );
+
+  // Dirección 1: con la proyección al día, cero divergencias.
+  const alDia = await sql(
+    withTenant(TENANT_A, CONSULTA_DIVERGENCIAS)
+  );
+
+  assert(
+    alDia === '0',
+    'con los saldos al día, la reconciliación no reporta divergencias',
+    `Reportó ${alDia} divergencia(s) que no deberían existir.`
+  );
+
+  // Dirección 2: se adultera un saldo a mano, saltando `post_entry()`. Es
+  // exactamente el escenario que el job existe para detectar.
+  const adulterado = await trySql(
+    withTenant(
+      TENANT_A,
+      `
+DO $$
+DECLARE
+  v_t uuid := '${TENANT_A}';
+  v_filas integer;
+BEGIN
+  UPDATE accounting.account_balances
+     SET period_debit = period_debit + 999.00
+   WHERE tenant_id = v_t
+     AND id = (SELECT id FROM accounting.account_balances
+                WHERE tenant_id = v_t AND period_debit > 0
+                ORDER BY period_debit DESC LIMIT 1);
+
+  GET DIAGNOSTICS v_filas = ROW_COUNT;
+  IF v_filas <> 1 THEN
+    RAISE EXCEPTION
+      'La prueba necesita un saldo con movimientos para adulterar y no lo encontro (filas: %). '
+      'Sin eso, la direccion 2 no prueba nada.', v_filas;
+  END IF;
+END $$;
+`
+    )
+  );
+
+  assert(adulterado.ok, 'se pudo adulterar un saldo para la prueba', adulterado.err);
+
+  const detectado = await sql(withTenant(TENANT_A, CONSULTA_DIVERGENCIAS));
+
+  assert(
+    Number(detectado) >= 1,
+    'un saldo adulterado a mano es DETECTADO por la reconciliación',
+    `No detectó nada. Una consulta que nunca encuentra divergencias no controla nada.`
+  );
+
+  // Y el job reporta sin corregir: el saldo adulterado tiene que seguir ahí.
+  // Si la consulta "arreglara" el saldo, la prueba anterior pasaría por la razón
+  // equivocada —y en producción se habría destruido la evidencia del error.
+  const sigueAdulterado = await sql(
+    withTenant(
+      TENANT_A,
+      `
+SELECT count(*)::text FROM (
+  WITH ledger AS (
+    SELECT l.tenant_id, l.account_id, e.period_id,
+           COALESCE(sum(l.debit), 0) AS sum_debit,
+           COALESCE(sum(l.credit), 0) AS sum_credit
+    FROM accounting.journal_lines l
+    JOIN accounting.journal_entries e
+      ON e.tenant_id = l.tenant_id AND e.id = l.entry_id
+    GROUP BY l.tenant_id, l.account_id, e.period_id
+  )
+  SELECT b.account_id
+  FROM accounting.account_balances b
+  FULL OUTER JOIN ledger l
+    ON l.tenant_id = b.tenant_id AND l.account_id = b.account_id AND l.period_id = b.period_id
+  WHERE COALESCE(b.period_debit, 0) IS DISTINCT FROM COALESCE(l.sum_debit, 0)
+     OR COALESCE(b.period_credit, 0) IS DISTINCT FROM COALESCE(l.sum_credit, 0)
+) d;
+`
+    )
+  );
+
+  assert(
+    Number(sigueAdulterado) >= 1,
+    'la reconciliación reporta y NO corrige (la evidencia sigue intacta)',
+    'El saldo se corrigió solo: eso destruye la evidencia de dónde está el error.'
+  );
+}
+
+// =============================================================================
 // Ejecución
 // =============================================================================
 async function main() {
@@ -1362,6 +1507,7 @@ async function main() {
   await testMappingProducesCorrectLines();
   await testZeroVatLineOmitted();
   await testPostingGapsView();
+  await testAccountingReconciliation();
 
   console.log('\n' + '='.repeat(70));
   if (failures.length === 0) {

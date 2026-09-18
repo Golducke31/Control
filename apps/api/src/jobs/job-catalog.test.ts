@@ -96,6 +96,7 @@ test('los jobs transversales activan el modo plataforma', () => {
   const transversal = [
     'certificate.expiry',
     'stock.reconciliation',
+    'accounting.reconciliation',
     'accounting.posting_check',
     'outbox.reaper',
   ];
@@ -146,5 +147,60 @@ test('el job de verificación compara contra un universo no vacío', () => {
     source,
     /app\.stock_movements/,
     'el job no cuenta los movimientos de stock: el control de cordura está incompleto'
+  );
+});
+
+test('la reconciliación contable corre después de la de stock y antes de la verificación', () => {
+  // El orden de los jobs nocturnos es una decisión, no una coincidencia: si un
+  // asiento falta, los saldos divergen POR ESO, y conviene leer el reporte de
+  // divergencias como consecuencia del de hechos sin asiento y no como causa.
+  // Al revés, el operador investiga la proyección cuando el problema está en la
+  // generación —el trabajo se duplica y el diagnóstico se equivoca.
+  //
+  // Se compara la hora de cada uno en vez de fijar los literales: lo que importa
+  // es la relación, no que valga 04:45.
+  const horaDe = (code: string): number => {
+    const expr = JOB_SCHEDULE[code];
+    assert.ok(expr !== undefined, `"${code}" no tiene cadencia`);
+    const partes = expr.split(/\s+/);
+    const min = Number(partes[0]);
+    const h = Number(partes[1]);
+    assert.ok(
+      Number.isFinite(min) && Number.isFinite(h),
+      `"${code}" tiene la cadencia "${expr}", que no es del tipo "M H * * *"`
+    );
+    return h * 60 + min;
+  };
+
+  const stock = horaDe('stock.reconciliation');
+  const contable = horaDe('accounting.reconciliation');
+  const posting = horaDe('accounting.posting_check');
+
+  assert.ok(
+    stock < contable,
+    `la reconciliación contable (${contable}) debe correr después de la de stock (${stock}): ` +
+      'la de stock captura los movimientos del día que la contable va a valuar'
+  );
+  assert.ok(
+    contable < posting,
+    `la verificación de asientos (${posting}) debe correr después de la reconciliación ` +
+      `contable (${contable}): un asiento faltante explica una divergencia de saldos, ` +
+      'no al revés'
+  );
+});
+
+test('la reconciliación contable tampoco autocorrige los saldos', () => {
+  // Mismo criterio que stock.reconciliation: la divergencia es un síntoma y
+  // desde el job no se sabe cuál de las dos vistas está mal. Si el bug fue en la
+  // escritura del libro, corregir el saldo propaga el error y destruye la
+  // evidencia. Un `UPDATE accounting.account_balances` acá sería el defecto.
+  const def = JOB_DEFINITIONS.find((d) => d.code === 'accounting.reconciliation');
+  assert.ok(def !== undefined, 'accounting.reconciliation no está en el catálogo');
+
+  const source = def.run.toString();
+  assert.doesNotMatch(
+    source,
+    /UPDATE\s+accounting\.account_balances|INSERT\s+INTO\s+accounting\.account_balances/i,
+    'el job está escribiendo los saldos: eso destruye la evidencia de dónde está el error'
   );
 });

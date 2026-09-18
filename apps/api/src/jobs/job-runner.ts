@@ -647,12 +647,168 @@ export const accountingPostingCheckJob: JobDefinition = {
   },
 };
 
+/**
+ * Reconciliación contable: compara los saldos materializados
+ * (`accounting.account_balances`) contra la suma del libro
+ * (`accounting.journal_lines`) y reporta las diferencias.
+ *
+ * POR QUÉ EXISTE
+ *
+ * `account_balances` es una proyección: la mantiene `post_entry()` por upsert
+ * dentro de la misma transacción del asiento, no se recalcula desde el libro.
+ * Eso la hace rápida de leer —el balance de un período es una consulta a una
+ * tabla, no un `GROUP BY` sobre todo el diario— y la hace frágil por la misma
+ * razón que `stock_levels`. Cualquier camino que escriba en `account_balances`
+ * sin pasar por `post_entry()` —una migración de datos, un `UPDATE` manual, un
+ * script de importación, un bug en un reintento— desincroniza las dos vistas sin
+ * que nada lo note.
+ *
+ * Y no lo nota porque el libro SIGUE CUADRANDO. La partida doble la garantiza el
+ * trigger sobre `journal_lines`, no la proyección: una divergencia en los saldos
+ * no descuadra nada, simplemente hace que el balance que se le muestra al
+ * contador diga un número distinto al que dice el diario. Dos informes que
+ * deberían coincidir y no coinciden, sin ningún error en el medio.
+ *
+ * POR QUÉ NO SE AUTOCORRIGE
+ *
+ * Igual que `stock.reconciliation`, y por la misma razón: la diferencia es un
+ * SÍNTOMA, y desde el job no hay forma de saber cuál de las dos vistas está mal.
+ * Si el bug fue en la escritura del libro, corregir el saldo propaga el error y
+ * destruye la única evidencia. El job reporta y deja que un humano decida.
+ *
+ * SOBRE RLS
+ *
+ * Es transversal: tiene que ver todas las empresas. Corre en modo plataforma.
+ * Sin él, ambas consultas devuelven cero filas y el job reportaría "saldos
+ * consistentes" sin haber mirado nada. Por eso el control de cordura de abajo:
+ * el conteo de combinaciones comparadas es lo que distingue "todo bien" de "no
+ * vi nada".
+ */
+export const accountingReconciliationJob: JobDefinition = {
+  code: 'accounting.reconciliation',
+  async run({ client, log }) {
+    // Contexto de plataforma explícito: sin esto ambas consultas devuelven 0
+    // filas por RLS y el job reporta un falso "todo consistente".
+    await client.query('SELECT app.set_tenant_context(NULL, NULL, true)');
+
+    // La aritmética replica EXACTAMENTE la de accounting.post_entry():
+    //   · period_debit  ← sum(journal_lines.debit)  por (tenant, cuenta, período)
+    //   · period_credit ← sum(journal_lines.credit) por (tenant, cuenta, período)
+    //
+    // Los saldos de apertura (`opening_debit`/`opening_credit`) NO se comparan
+    // acá: no los escribe `post_entry()` —los arrastra el cierre de ejercicio,
+    // que es una operación de E5—, así que compararlos contra una suma del libro
+    // que no los incluye inventaría una diferencia en cada fila con apertura. Se
+    // comparan sólo contra las filas del período, que es lo que esta migración
+    // mantiene.
+    //
+    // El FULL OUTER JOIN es lo que hace que la comparación encuentre las dos
+    // formas de divergir: un saldo que existe sin líneas que lo respalden, y
+    // líneas que existen sin saldo que las refleje. Un JOIN simple sólo vería la
+    // primera —la segunda es la más grave, porque significa que el asiento se
+    // registró y la proyección no se actualizó—.
+    const { rows } = await client.query<{
+      tenant_id: string;
+      account_id: string;
+      period_id: string;
+      book_debit: number;
+      book_credit: number;
+      sum_debit: number;
+      sum_credit: number;
+    }>(`
+      WITH ledger AS (
+        SELECT
+          l.tenant_id,
+          l.account_id,
+          e.period_id,
+          COALESCE(sum(l.debit),  0) AS sum_debit,
+          COALESCE(sum(l.credit), 0) AS sum_credit
+        FROM accounting.journal_lines l
+        JOIN accounting.journal_entries e
+          ON e.tenant_id = l.tenant_id AND e.id = l.entry_id
+        GROUP BY l.tenant_id, l.account_id, e.period_id
+      )
+      SELECT
+        COALESCE(b.tenant_id,  l.tenant_id)  AS tenant_id,
+        COALESCE(b.account_id, l.account_id) AS account_id,
+        COALESCE(b.period_id,  l.period_id)  AS period_id,
+        COALESCE(b.period_debit,  0)         AS book_debit,
+        COALESCE(b.period_credit, 0)         AS book_credit,
+        COALESCE(l.sum_debit,  0)            AS sum_debit,
+        COALESCE(l.sum_credit, 0)            AS sum_credit
+      FROM accounting.account_balances b
+      FULL OUTER JOIN ledger l
+        ON  l.tenant_id  = b.tenant_id
+        AND l.account_id = b.account_id
+        AND l.period_id  = b.period_id
+      WHERE COALESCE(b.period_debit,  0) IS DISTINCT FROM COALESCE(l.sum_debit,  0)
+         OR COALESCE(b.period_credit, 0) IS DISTINCT FROM COALESCE(l.sum_credit, 0)
+      ORDER BY 1, 2, 3
+    `);
+
+    // Control de cordura: cuántas combinaciones se compararon. Sin esto, "0
+    // diferencias" es ambiguo —puede ser "todo consistente" o "el RLS no me dejó
+    // ver nada"—. Con el número, los dos casos se distinguen.
+    const compared = await client.query<{ n: string }>(`
+      SELECT (
+        (SELECT count(*) FROM accounting.account_balances)
+        + (SELECT count(*)
+             FROM (
+               SELECT l.tenant_id, l.account_id, e.period_id
+               FROM accounting.journal_lines l
+               JOIN accounting.journal_entries e
+                 ON e.tenant_id = l.tenant_id AND e.id = l.entry_id
+               GROUP BY l.tenant_id, l.account_id, e.period_id
+             ) x)
+      )::text AS n
+    `);
+    const totalCompared = Number(compared.rows[0]?.n ?? '0');
+
+    if (totalCompared === 0) {
+      log(
+        'no hay saldos ni líneas que comparar: nada que verificar. ' +
+          'Si el sistema está en operación, revisar que el modo plataforma se haya aplicado.'
+      );
+    }
+
+    for (const d of rows.slice(0, 20)) {
+      log(
+        `divergencia de saldo: inquilino ${d.tenant_id} cuenta ${d.account_id} ` +
+          `período ${d.period_id} — libro debe ${d.sum_debit} haber ${d.sum_credit}; ` +
+          `saldo materializado debe ${d.book_debit} haber ${d.book_credit}`
+      );
+    }
+    if (rows.length > 20) {
+      log(`… y ${rows.length - 20} divergencia(s) más`);
+    }
+
+    return {
+      compared: totalCompared,
+      differences: rows.length,
+      // Detalle acotado: `outcome` es jsonb en el ledger y crece con cada
+      // corrida. Guardar miles de filas por día haría del ledger una tabla de
+      // datos de negocio en vez de un registro de ejecuciones.
+      sample: rows.slice(0, 50).map((d) => ({
+        tenantId: d.tenant_id,
+        accountId: d.account_id,
+        periodId: d.period_id,
+        bookDebit: d.book_debit,
+        bookCredit: d.book_credit,
+        ledgerDebit: d.sum_debit,
+        ledgerCredit: d.sum_credit,
+      })),
+      truncated: rows.length > 50,
+    };
+  },
+};
+
 /** Catálogo de jobs que expone este runner. */
 export const JOB_DEFINITIONS: JobDefinition[] = [
   partitionMaintenanceJob,
   partitionRetentionJob,
   certificateExpiryJob,
   stockReconciliationJob,
+  accountingReconciliationJob,
   accountingPostingCheckJob,
   outboxReaperJob,
 ];
@@ -673,6 +829,13 @@ export const JOB_SCHEDULE: Record<string, string> = {
   // particiones (03:00) y de la purga (04:00). El orden importa: si corriera
   // antes, compararía contra un libro que está a punto de cambiar.
   'stock.reconciliation': '30 4 * * *', // diario, 04:30
+  // La reconciliación contable corre a las 04:45, entre la de stock (04:30) y la
+  // verificación de asientos (05:00). El orden no es decorativo: si un asiento
+  // falta, los saldos van a divergir por eso, y conviene que el reporte de
+  // divergencias llegue DESPUÉS del de hechos sin asiento para poder leerlo como
+  // consecuencia y no como causa. Al revés, el operador investigaría la
+  // proyección cuando el problema está en la generación.
+  'accounting.reconciliation': '45 4 * * *', // diario, 04:45
   // La verificación de asientos corre a las 05:00, después de la reconciliación
   // de stock (04:30) y bastante después del cierre operativo del día. La hora es
   // deliberada: los asientos se generan DENTRO de la transacción del hecho, así
