@@ -426,6 +426,14 @@ SELECT app.assert_rls_coverage();
 
 Recorre el catálogo real y lanza excepción si alguna tabla o partición de negocio carece de `FORCE RLS` o de política. Se ejecuta al final de las migraciones y en CI. Un PR que agregue una tabla sin política falla el pipeline en lugar de llegar a producción.
 
+**La segunda trampa, la que hace que las pruebas mientan**
+
+`FORCE ROW LEVEL SECURITY` —obligatorio en este proyecto— existe para que el **owner** de la tabla no pueda saltearse las políticas. Es una protección real, pero acotada: **no alcanza al superusuario ni a un rol con `BYPASSRLS`**. Esos ignoran RLS siempre, sin excepción.
+
+La consecuencia práctica es contraintuitiva: si una prueba de aislamiento se conecta con un DSN de superusuario, cada aserción pasa **por el motivo equivocado**. El rol ve todas las filas de todos los inquilinos, así que "con contexto de A no se ven filas de B" da falso —tanto si las políticas funcionan como si están completamente rotas—. La prueba es verde y no prueba nada.
+
+Por eso la conexión que ejercita las políticas debe ser un rol de aplicación sin privilegios de bypass (`app_login IN ROLE control_app`, ver §12.2), y por eso la suite aborta si detecta lo contrario en vez de advertirlo. Un falso negativo ruidoso es preferible a un falso positivo silencioso en la única barrera que impide que una empresa lea los datos de otra.
+
 > **Regla operativa:** nunca crear una partición con `CREATE TABLE ... PARTITION OF` suelto. Usar `app.ensure_month_partition()`, que aplica la cobertura en la misma transacción. No existe ventana en la que la partición exista sin protección.
 
 ### 3.6 Vistas de monitoreo de particiones
@@ -1036,8 +1044,11 @@ Control/
 │   └── isolation/
 │       ├── run.mjs                             # ★ Suite de aislamiento multi-tenant
 │       └── lint_rls_coverage.sql               # Lint de PR: tabla sin política
+├── scripts/
+│   └── verify-isolation.ps1                    # Verificación completa en Windows
 ├── tools/
-│   └── validate-workflow.mjs                   # Validador estructural del CI
+│   ├── validate-workflow.mjs                   # Validador estructural del CI
+│   └── check-suite-sql.mjs                     # Valida el SQL embebido en la suite
 ├── docs/
 │   └── PLAN-PRODUCCION.md                      # Plan a producción multinacional
 └── prototype/
@@ -1060,7 +1071,8 @@ Control/
 | [`apps/api/src/modules/fiscal/fiscal-driver.ts`](apps/api/src/modules/fiscal/fiscal-driver.ts) | Contrato neutral para el motor fiscal multi-país. |
 | [`apps/api/src/realtime/tracking.service.ts`](apps/api/src/realtime/tracking.service.ts) | Bus por tenant, SSE/WS, backpressure, máquina de estados. |
 | [`apps/api/src/modules/exports/report.service.ts`](apps/api/src/modules/exports/report.service.ts) | Contraste WCAG, sanitizador, motor de temas, XLSX y PDF. |
-| [`tests/isolation/run.mjs`](tests/isolation/run.mjs) | Suite de aislamiento: cobertura, lectura, escritura, fail-closed. |
+| [`tests/isolation/run.mjs`](tests/isolation/run.mjs) | Suite de aislamiento: cobertura, lectura, escritura, fail-closed, ledger. Con guardia de rol. |
+| [`scripts/verify-isolation.ps1`](scripts/verify-isolation.ps1) | Ciclo completo en Windows: migra, crea el rol de aplicación, corre lint, suite y prueba negativa. |
 | [`prototype/index.html`](prototype/index.html) | Prototipo funcional. Abrir en el navegador. |
 
 ---
@@ -1082,14 +1094,38 @@ done
 psql -d control -v ON_ERROR_STOP=1 -f db/seed/0001_system_catalog.sql
 ```
 
+`ON_ERROR_STOP=1` no es opcional: sin él, `psql` continúa después de un error y las migraciones quedan aplicadas **a medias sin avisar**. Es el peor modo de falla posible, porque el esquema parece migrado y las mediciones posteriores miden otra cosa.
+
+**En Windows**, la misma operación en PowerShell nativo (el `for f in $(ls ...)` de arriba es sintaxis de bash y PowerShell no la interpreta):
+
+```powershell
+Get-ChildItem -Path "db\migrations\*.sql" | Sort-Object Name | ForEach-Object {
+  Write-Host "=== $($_.Name) ==="
+  psql -d control -v ON_ERROR_STOP=1 -f $_.FullName
+  if ($LASTEXITCODE -ne 0) { throw "Falló $($_.Name)" }
+}
+```
+
+O directamente el script que hace todo el ciclo, incluida la verificación:
+
+```powershell
+# Consola ELEVADA. Crea la base, migra, crea el rol de aplicación,
+# corre el lint, la suite y la prueba negativa de la guardia de rol.
+powershell -ExecutionPolicy Bypass -File scripts/verify-isolation.ps1
+```
+
 ### 12.2 Usuario de aplicación
 
-El rol de login se crea fuera de las migraciones, con credenciales del gestor de secretos:
+El rol de login se crea **después de migrar** —depende de `control_app`, que nace en la migración `0007`— y con credenciales del gestor de secretos:
 
 ```sql
 -- La contraseña va en el secret manager, nunca en el repositorio
-CREATE ROLE app_login LOGIN PASSWORD :'app_password' IN ROLE control_app;
+CREATE ROLE app_login LOGIN PASSWORD :'app_password' NOBYPASSRLS IN ROLE control_app;
 ```
+
+`NOBYPASSRLS` se declara explícitamente aunque sea el valor por defecto, porque es la propiedad de la que depende que **toda** la verificación de aislamiento signifique algo. Un rol con `BYPASSRLS` —o el superusuario— ignora las políticas RLS incluso cuando las tablas tienen `FORCE ROW LEVEL SECURITY`. Ver §12.4.
+
+Un login creado con `IN ROLE control_app` **sí** hereda los privilegios del rol al conectar: el `NOINHERIT` que lleva `control_app` afecta a la propagación *desde* él, no a la membresía *hacia* él. El login debe quedar con el `INHERIT` por defecto (no agregarle `NOINHERIT`).
 
 ### 12.3 Verificar el aislamiento
 
@@ -1130,10 +1166,35 @@ La prueba 3 es la más importante: **sin contexto debe devolver cero filas**, no
 La verificación manual sirve para entender el mecanismo; la suite automatizada es la que protege el sistema en cada cambio:
 
 ```bash
-DATABASE_URL="postgres://user:pass@host:5432/control" node tests/isolation/run.mjs --verbose
+node tests/isolation/run.mjs \
+  --dsn       "postgres://app_login:...@host:5432/control" \
+  --admin-dsn "postgres://postgres:...@host:5432/control" \
+  --verbose
 ```
 
-La suite **descubre las tablas desde `pg_class`**, no desde una lista escrita a mano. Para cada tabla con `tenant_id` verifica:
+**Las dos conexiones son deliberadas, y cambiarlas rompe lo que la suite mide.**
+
+| Conexión | Rol | Para qué |
+|---|---|---|
+| `--dsn` | Aplicación: miembro de `control_app`, **sin** `BYPASSRLS` | Conduce las pruebas de aislamiento. Es el único rol con el que el resultado significa algo. |
+| `--admin-dsn` | Plataforma | Prepara y limpia el escenario: crea inquilinos y purga `audit.events`. |
+
+Por qué la preparación necesita un rol distinto: `control_app` no tiene `INSERT` sobre `app.tenants` ni `app.memberships` —sus políticas exigen `is_platform_admin()`— y `audit.events` lleva una política `RESTRICTIVE USING (false)` que hace que un `DELETE` con rol de aplicación afecte **0 filas sin lanzar error**. Con una sola conexión, la limpieza no limpiaba y el escenario se ensuciaba entre corridas, en silencio.
+
+> **El superusuario ignora RLS. Siempre.** Ni `FORCE ROW LEVEL SECURITY` lo detiene: `FORCE` existe para que el *owner* de la tabla también quede sujeto a las políticas, pero no alcanza al superusuario ni a un rol con `BYPASSRLS`. Si la suite corriera con un DSN de superusuario, leería las filas de todos los inquilinos y las aserciones de fuga darían falso —tanto con las políticas bien como con las políticas rotas—. El pipeline de CI **tenía este defecto**: usar el DSN de superusuario y nunca ejercitar una sola política.
+
+Para que eso no pueda repetirse, la suite tiene una **guardia de rol** que corre antes de tocar nada y aborta con exit 2 si detecta un rol privilegiado o uno que no sea miembro de `control_app`. Consulta `pg_has_role(current_user, 'control_app', 'MEMBER')` en vez de comparar contra un nombre, así funciona con cualquier login.
+
+**Prueba negativa obligatoria**: correr la suite con el DSN de superusuario **debe** abortar.
+
+```bash
+node tests/isolation/run.mjs --dsn "postgres://postgres:...@host:5432/control"
+# exit 2 — ABORTADO: la suite se conectó como `postgres`, que es superusuario...
+```
+
+Si esa corrida pasa en verde, la guardia está rota y el aislamiento no se está probando. El job `isolation` del CI ejecuta esta prueba negativa en cada PR, precisamente para que la guardia no pueda degradarse sin que nadie lo note.
+
+La suite **descubre las tablas desde `pg_class`** y los esquemas desde `pg_namespace` —no desde una lista escrita a mano, que se desactualiza en silencio—. Para cada tabla con `tenant_id` verifica:
 
 | Grupo | Verificación |
 |---|---|
@@ -1142,8 +1203,15 @@ La suite **descubre las tablas desde `pg_class`**, no desde una lista escrita a 
 | **C · Escritura** | `UPDATE`/`DELETE` sobre filas ajenas afectan 0 filas; `INSERT` con `tenant_id` ajeno y reasignación de una fila propia a otro inquilino fallan por `WITH CHECK`. |
 | **D · Fail-closed** | Sin contexto, cero filas en todas las tablas. Además comprueba que un `SET` sin `LOCAL` no deja el inquilino pegado en la conexión. |
 | **E · Aserción** | `app.assert_rls_coverage()` existe y pasa sobre el esquema actual. |
+| **F · Ledger de jobs** | `ops.jobs` y `ops.job_runs` existen, el catálogo está poblado, `ops` no tiene `tenant_id`, el índice único rechaza dos ejecuciones vivas del mismo job, `begin_job_run` devuelve `NULL` cuando ya hay una viva y `finish_job_run` es idempotente. Además comprueba que la aplicación **no** puede escribir el ledger. |
 
-La suite corre en CI sobre una base migrada desde cero en cada PR ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Junto con `tests/isolation/lint_rls_coverage.sql`, materializa el criterio **F0-AC2** del plan: *un PR con una tabla nueva sin política RLS falla el pipeline antes de que lo vea un revisor.*
+La suite corre en CI sobre una base migrada desde cero en cada PR ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), con `app_login` para probar y `postgres` sólo para migrar. Junto con `tests/isolation/lint_rls_coverage.sql`, materializa el criterio **F0-AC2** del plan: *un PR con una tabla nueva sin política RLS falla el pipeline antes de que lo vea un revisor.*
+
+Para validar el SQL embebido en la suite sin un motor disponible (hay comentarios y bloques largos dentro de template literals, que `node --check` no inspecciona):
+
+```bash
+node tools/check-suite-sql.mjs tests/isolation/run.mjs
+```
 
 ### 12.5 Prototipo
 
@@ -1185,6 +1253,9 @@ Estos puntos están identificados y no resueltos en esta entrega:
 
 - **Aislamiento RLS en tablas particionadas.** Las políticas declaradas sólo sobre el padre no alcanzaban a las particiones. Corregido en `0008`, con la barrera `assert_rls_coverage()` que falla el build ante cualquier tabla nueva sin política, y `0009` para que las particiones futuras nazcan protegidas. Ver [§3.5](#35-tablas-particionadas-las-políticas-no-se-heredan).
 - **Mantenimiento de particiones y alerta de certificados sin invocación.** `0010` e `0011` crean el ledger de jobs y sus permisos; `job-runner.ts` los ejecuta con garantía de cierre. Ver [§3.7](#37-tareas-programadas-el-ledger-y-por-qué-existe).
+- **La suite de aislamiento no probaba el aislamiento.** Se conectaba con un único DSN y nunca hacía `SET ROLE`: con un rol de superusuario —el caso normal, y el que usaba el propio CI— PostgreSQL ignora RLS aun con `FORCE ROW LEVEL SECURITY`, así que las aserciones de fuga daban falso en ambos sentidos. Ahora la suite exige un rol de aplicación (guardia que aborta con exit 2), recibe una segunda conexión administrativa para preparar el escenario, y el CI ejecuta una **prueba negativa** que verifica que la guardia efectivamente aborte. Ver [§12.4](#124-suite-automatizada-de-aislamiento).
+- **La limpieza del escenario no limpiaba.** `setup()` usaba `SET LOCAL app.platform_admin = 'on'` suelto y borraba `audit.events` con un rol sin privilegios: la política `RESTRICTIVE USING (false)` hacía que el `DELETE` afectara 0 filas **sin lanzar error**. Ahora la preparación va por la conexión administrativa, con el camino validado `app.set_tenant_context(NULL, NULL, true)`, y el escenario se verifica antes de correr las pruebas.
+- **Descubrimiento de esquemas unificado.** La suite y el lint usaban listas de esquemas fijas (`app`, `billing`, `logistics`, `audit`) mientras `assert_rls_coverage()` los descubre desde `pg_namespace`. Un esquema nuevo con datos de inquilino habría quedado sin cubrir por las tres herramientas a la vez. Los tres usan ahora el mismo criterio dinámico.
 
 ---
 

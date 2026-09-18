@@ -76,6 +76,12 @@ jobs:
   # ---------------------------------------------------------------------------
   # 2 · Lint de cobertura RLS. Rápido, sin datos: detecta la tabla nueva sin
   #     política antes de que llegue a revisión humana.
+  #
+  #     El lint consulta el catálogo (`pg_class`, `pg_policy`), que es visible
+  #     para cualquier rol. Migrar requiere superusuario —hay `CREATE ROLE` en
+  #     0007—, así que la preparación va con el DSN administrativo; el lint en sí
+  #     corre con el rol de aplicación para que el privilegio que ejercita sea el
+  #     mismo que el de la suite.
   # ---------------------------------------------------------------------------
   rls-lint:
     name: Lint de cobertura RLS
@@ -93,7 +99,8 @@ jobs:
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+      ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+      DATABASE_URL: postgres://app_login:AppL0gin!@localhost:5432/control_test
     steps:
       - uses: actions/checkout@v4
 
@@ -101,9 +108,15 @@ jobs:
         run: |
           set -euo pipefail
           for f in $(ls db/migrations/*.sql | sort); do
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
           done
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+
+      - name: Crear el rol de aplicación
+        run: |
+          set -euo pipefail
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE app_login LOGIN PASSWORD 'AppL0gin!' NOBYPASSRLS IN ROLE control_app;"
 
       - name: Ejecutar lint (falla si hay filas)
         run: |
@@ -120,6 +133,18 @@ jobs:
   # ---------------------------------------------------------------------------
   # 3 · Suite de aislamiento con datos reales de dos inquilinos. Es la prueba
   #     que de verdad importa: verifica lectura, escritura y fail-closed.
+  #
+  #     POR QUÉ DOS ROLES
+  #
+  #     El superusuario de PostgreSQL IGNORA RLS siempre, incluso con FORCE ROW
+  #     LEVEL SECURITY. Si la suite corriera con `postgres`, cada aserción de
+  #     fuga pasaría por el motivo equivocado: el rol ve todo, incluidas las
+  #     filas ajenas, así que "0 filas de B visibles desde A" daría falso tanto
+  #     con las políticas bien como con las políticas rotas. Este job usaba
+  #     antes el DSN de superusuario: el aislamiento nunca se probó.
+  #
+  #     `app_login` es miembro de `control_app` y no tiene BYPASSRLS, así que
+  #     ejercita las políticas reales que ve la aplicación.
   # ---------------------------------------------------------------------------
   isolation:
     name: Aislamiento multi-tenant
@@ -137,7 +162,10 @@ jobs:
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+      # Administrativo: sólo para migrar y preparar el escenario.
+      ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+      # De aplicación: conduce las pruebas. Debe ser miembro de control_app.
+      DATABASE_URL: postgres://app_login:AppL0gin!@localhost:5432/control_test
     steps:
       - uses: actions/checkout@v4
 
@@ -149,11 +177,46 @@ jobs:
         run: |
           set -euo pipefail
           for f in $(ls db/migrations/*.sql | sort); do
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
           done
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
 
-      - name: Ejecutar suite de aislamiento
+      - name: Crear el rol de aplicación
+        run: |
+          set -euo pipefail
+          # Sin LOGIN no se puede conectar; sin NOINHERIT hereda los privilegios
+          # de control_app al conectar (NOINHERIT por defecto es INHERIT, que es
+          # lo que queremos). NOBYPASSRLS es la propiedad que hace que la suite
+          # mida algo. `control_app` lo crea la migración 0007.
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE app_login LOGIN PASSWORD 'AppL0gin!' NOBYPASSRLS IN ROLE control_app;"
+
+      - name: Verificar que el rol de aplicación no sea privilegiado
+        run: |
+          set -euo pipefail
+          PRIV=$(psql "$ADMIN_DATABASE_URL" -t -A -c \
+            "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'app_login';")
+          if [ "$PRIV" != "f" ]; then
+            echo "::error::app_login es superusuario o tiene BYPASSRLS: la suite no probaría RLS"
+            exit 1
+          fi
+          echo "app_login: sin privilegios de bypass."
+
+      - name: Prueba negativa · la suite DEBE abortar con el DSN de superusuario
+        run: |
+          set -euo pipefail
+          set +e
+          node tests/isolation/run.mjs --dsn "$ADMIN_DATABASE_URL" --verbose
+          RC=$?
+          set -e
+          if [ "$RC" -ne 2 ]; then
+            echo "::error::La suite no abortó con el DSN de superusuario (exit $RC)."
+            echo "::error::La guardia de rol está rota: el aislamiento no se estaría probando."
+            exit 1
+          fi
+          echo "Guardia de rol confirmada: aborta (exit 2) con rol privilegiado."
+
+      - name: Ejecutar suite de aislamiento (rol de aplicación)
         run: node tests/isolation/run.mjs --verbose
 
   # ---------------------------------------------------------------------------

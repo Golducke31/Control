@@ -27,11 +27,32 @@
  *
  * USO
  *
- *   DATABASE_URL="postgres://user:pass@host:5432/db" node tests/isolation/run.mjs
- *   node tests/isolation/run.mjs --dsn "postgres://..." --verbose
+ *   node tests/isolation/run.mjs --dsn "postgres://app_login:...@host:5432/db" \
+ *                                --admin-dsn "postgres://postgres:...@host:5432/db" --verbose
+ *
+ *   DATABASE_URL="postgres://app_login:..." \
+ *   ADMIN_DATABASE_URL="postgres://postgres:..." node tests/isolation/run.mjs
+ *
+ * LAS DOS CONEXIONES, Y POR QUÉ SON DOS
+ *
+ *   `--dsn`        (rol de APLICACIÓN)  · conduce las pruebas de aislamiento.
+ *   `--admin-dsn`  (rol de PLATAFORMA)  · prepara y limpia el escenario.
+ *
+ * El rol de aplicación DEBE ser miembro de `control_app` y NO puede ser
+ * superusuario ni tener BYPASSRLS: el superusuario de PostgreSQL ignora RLS
+ * **siempre**, incluso con FORCE ROW LEVEL SECURITY, así que correr contra él
+ * reportaría "OK" sin haber ejercitado una sola política. La guardia de `main()`
+ * aborta con exit 2 si detecta ese caso. Es preferible un falso negativo ruidoso
+ * que un falso positivo silencioso en la única barrera de aislamiento.
+ *
+ * La preparación, en cambio, necesita privilegios que la aplicación no tiene ni
+ * debe tener: crear inquilinos y limpiar `audit.events` (cuya política es
+ * RESTRICTIVE USING (false) — un DELETE con rol de aplicación afecta 0 filas sin
+ * lanzar error). Por eso se usa una conexión administrativa aparte y el camino
+ * validado `app.set_tenant_context(NULL, NULL, true)`, igual que job-runner.ts.
  *
  * Requiere `psql` en el PATH (viene con el cliente de PostgreSQL).
- * Salida: código 0 si todo pasa, 1 si detecta cualquier fuga.
+ * Salida: 0 si todo pasa · 1 si detecta una fuga · 2 si el entorno no sirve.
  * =============================================================================
  */
 
@@ -45,10 +66,23 @@ const run = promisify(execFile);
 // -----------------------------------------------------------------------------
 const args = process.argv.slice(2);
 const VERBOSE = args.includes('--verbose') || args.includes('-v');
+
+// Conexión de APLICACIÓN: conduce las pruebas de aislamiento. Debe ser un rol
+// miembro de `control_app`, sin BYPASSRLS. Su corrección la verifica assertAppRole().
 const DSN =
   readFlag('--dsn') ||
   process.env.DATABASE_URL ||
   process.env.PG_CONNECTION_STRING;
+
+// Conexión de PLATAFORMA: sólo para preparar y limpiar el escenario. Tiene los
+// privilegios que la aplicación no tiene (crear inquilinos, purgar auditoría).
+// Si no se provee, se cae al DSN de aplicación: así una base donde el mismo rol
+// sirve para ambas cosas sigue funcionando — pero entonces la guardia de rol
+// probablemente aborte, que es exactamente lo que queremos que pase.
+const ADMIN_DSN =
+  readFlag('--admin-dsn') ||
+  process.env.ADMIN_DATABASE_URL ||
+  DSN;
 
 function readFlag(name) {
   const i = args.indexOf(name);
@@ -58,8 +92,9 @@ function readFlag(name) {
 if (!DSN) {
   console.error(
     'Falta la cadena de conexión.\n' +
-      '  DATABASE_URL="postgres://user:pass@host:5432/db" node tests/isolation/run.mjs\n' +
-      '  o: node tests/isolation/run.mjs --dsn "postgres://..."'
+      '  node tests/isolation/run.mjs --dsn "postgres://app_login:...@host:5432/db" \\\n' +
+      '                               --admin-dsn "postgres://postgres:...@host:5432/db"\n' +
+      '  o: DATABASE_URL="postgres://..." ADMIN_DATABASE_URL="postgres://..." node tests/isolation/run.mjs'
   );
   process.exit(2);
 }
@@ -86,24 +121,42 @@ const failures = [];
  * Ejecuta SQL como una transacción única y devuelve stdout crudo.
  * Cada consulta va en su propia transacción para que `SET LOCAL` tenga el
  * alcance correcto — igual que hace la aplicación en producción.
+ *
+ * `asAdmin` es una decisión de privilegio, no una comodidad: cambiarlo cambia
+ * qué está probando la suite. Ver el encabezado.
  */
-async function sql(statements) {
+async function sql(statements, { asAdmin = false } = {}) {
   const script = ['\\set ON_ERROR_STOP on', statements].join('\n');
   const { stdout } = await run(
     'psql',
-    [DSN, '--no-psqlrc', '--quiet', '--tuples-only', '--no-align', '-v', 'ON_ERROR_STOP=1', '-c', script],
+    [
+      asAdmin ? ADMIN_DSN : DSN,
+      '--no-psqlrc',
+      '--quiet',
+      '--tuples-only',
+      '--no-align',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-c',
+      script,
+    ],
     { maxBuffer: 32 * 1024 * 1024 }
   );
   return stdout.trim();
+}
+
+/** Atajo: SQL con privilegios de plataforma (preparación del escenario). */
+function sqlAdmin(statements) {
+  return sql(statements, { asAdmin: true });
 }
 
 /**
  * Ejecuta y devuelve { ok, out, err } sin lanzar.
  * Se usa para las pruebas que ESPERAN un error de política.
  */
-async function trySql(statements) {
+async function trySql(statements, opts = {}) {
   try {
-    return { ok: true, out: await sql(statements) };
+    return { ok: true, out: await sql(statements, opts) };
   } catch (e) {
     return { ok: false, err: String(e.stderr || e.message) };
   }
@@ -137,25 +190,38 @@ function withoutTenant(body) {
 
 // =============================================================================
 // 0 · Preparación: inquilinos, usuarios y contexto mínimo
+//
+// Todo este bloque corre con la conexión ADMINISTRATIVA. La razón no es
+// comodidad: `control_app` no tiene INSERT sobre `app.tenants` ni sobre
+// `app.memberships` (sus políticas exigen is_platform_admin()), y `audit.events`
+// tiene una política RESTRICTIVE USING (false) que haría que un DELETE con rol
+// de aplicación afectara 0 filas **sin lanzar error** — limpieza que no limpia,
+// en silencio, y escenario que se ensucia entre corridas.
+//
+// El contexto de plataforma se activa con `app.set_tenant_context(NULL, NULL,
+// true)`, el mismo camino que usa job-runner.ts. Antes acá había un
+// `SET LOCAL app.platform_admin = 'on'` suelto, que se saltea la verificación de
+// privilegios de la propia función y por eso no detecta un DSN mal elegido.
 // =============================================================================
 async function setup() {
-  console.log('\n\u25b6 Preparación del escenario');
+  console.log('\n\u25b6 Preparación del escenario (rol de plataforma)');
 
-  // Limpieza idempotente de corridas anteriores.
-  await sql(`
+  // Limpieza idempotente de corridas anteriores. El orden respeta las claves
+  // foráneas: primero lo que depende, después el padre.
+  await sqlAdmin(`
 BEGIN;
-SET LOCAL app.platform_admin = 'on';
-DELETE FROM audit.events      WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
-DELETE FROM app.memberships   WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
-DELETE FROM app.tenant_branding WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
-DELETE FROM app.tenants       WHERE id       IN ('${TENANT_A}', '${TENANT_B}');
-DELETE FROM app.users         WHERE id       IN ('${USER_A}', '${USER_B}');
+SELECT app.set_tenant_context(NULL, NULL, true);
+DELETE FROM audit.events         WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.memberships      WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.tenant_branding  WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.tenants          WHERE id       IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.users            WHERE id       IN ('${USER_A}', '${USER_B}');
 COMMIT;
 `);
 
-  await sql(`
+  await sqlAdmin(`
 BEGIN;
-SET LOCAL app.platform_admin = 'on';
+SELECT app.set_tenant_context(NULL, NULL, true);
 INSERT INTO app.users (id, google_sub, email, email_verified, full_name)
 VALUES
   ('${USER_A}', 'isolation-sub-a', 'a@isolation.test', true, 'Inquilino A'),
@@ -173,7 +239,10 @@ VALUES
 COMMIT;
 `);
 
-  // Datos de negocio para los dos inquilinos, en las tablas mínimas.
+  // Los datos de negocio sí se insertan con el rol de APLICACIÓN y contexto de
+  // inquilino. Es deliberado: si `control_app` no puede crear un cliente en su
+  // propia empresa, el sistema no sirve, y queremos enterarnos acá y no en
+  // producción. Además valida el camino `withTenant()` de punta a punta.
   await sql(`
 BEGIN;
 SELECT app.set_tenant_context('${TENANT_A}'::uuid, '${ACTOR}'::uuid, false);
@@ -194,12 +263,83 @@ VALUES ('00000000-0000-4000-b000-00000000d002', '${TENANT_B}', 'SKU-B-1', 'Produ
 COMMIT;
 `);
 
+  // Confirmación de que el escenario quedó armado. Sin esto, un `INSERT` que no
+  // insertó (por RLS, por un trigger, por lo que sea) se manifestaría más tarde
+  // como "la empresa A no ve sus filas" — un síntoma a kilómetros del defecto.
+  // Se consulta con el rol de aplicación, que es lo que el test va a ver.
+  await verifyScenario();
+
   console.log('  Escenario listo: 2 inquilinos, datos en ambos.');
+}
+
+/**
+ * Verifica que el escenario sea el que la suite cree que es.
+ * Se corre con el rol de APLICACIÓN: si algo no es visible desde ahí, los tests
+ * de la sección B darían un falso OK por vacío en vez de por aislamiento.
+ */
+async function verifyScenario() {
+  const own = await sql(
+    withTenant(
+      TENANT_A,
+      `SELECT (SELECT count(*) FROM app.customers WHERE tenant_id = '${TENANT_A}'::uuid)
+             || '|' ||
+             (SELECT count(*) FROM app.customers WHERE tenant_id = '${TENANT_B}'::uuid);`
+    )
+  );
+
+  const [aCount, bCount] = own.split('|').map(Number);
+
+  if (aCount < 1) {
+    console.error(
+      `\n  El escenario no quedó armado: la empresa A no ve su propio cliente.\n` +
+        `  Sin datos propios, los tests de lectura darían un falso OK por vacío.\n` +
+        `  Revisá los errores de preparación de arriba.`
+    );
+    process.exit(2);
+  }
+
+  if (bCount !== 0) {
+    // Esto se detectaría igual en la sección B, pero acá el mensaje es más útil:
+    // señala el escenario, no la política.
+    console.error(
+      `\n  El escenario está contaminado: desde A se ven ${bCount} clientes de B.\n` +
+        `  Antes de culpar a las políticas, verificá que el DSN de aplicación\n` +
+        `  corresponda a un rol miembro de control_app y sin BYPASSRLS.`
+    );
+    process.exit(2);
+  }
+
+  if (VERBOSE) {
+    console.log(`  · Escenario verificado: A ve ${aCount} propio(s), 0 de B.`);
+  }
 }
 
 // =============================================================================
 // 1 · Descubrimiento del catálogo real de tablas
+//
+// Los esquemas se descubren desde `pg_namespace`, igual que hace
+// `app.assert_rls_coverage()` (0008) y `lint_rls_coverage.sql`. Los tres tienen
+// que coincidir: si este archivo usara una lista fija y la aserción no, podrían
+// discrepar y dejar un esquema nuevo sin cubrir sin que nadie se entere.
+//
+// Se excluyen los esquemas de sistema, los temporales y los que pertenecen a una
+// extensión — exactamente los mismos criterios que la aserción.
 // =============================================================================
+const PROJECT_SCHEMA_PREDICATE = `
+  n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'public')
+  AND n.nspname NOT LIKE 'pg_temp%'
+  AND n.nspname NOT LIKE 'pg_toast_temp%'
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_depend d
+    JOIN pg_extension e ON e.oid = d.objid
+    WHERE d.objid = n.oid AND d.deptype = 'e'
+  )
+  -- 'ops' es infraestructura de plataforma: no tiene tenant_id y está exenta por
+  -- nombre en assert_rls_coverage(). Se excluye acá para que las dos listas
+  -- coincidan en vez de que ésta lo incluya por accidente.
+  AND n.nspname <> 'ops'
+`;
+
 async function discoverTables() {
   const out = await sql(`
 SELECT n.nspname || '.' || c.relname || '|' || c.relrowsecurity || '|' || c.relforcerowsecurity
@@ -208,7 +348,7 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_attribute a ON a.attrelid = c.oid
      AND a.attname = 'tenant_id' AND a.attnum > 0 AND NOT a.attisdropped
 WHERE c.relkind IN ('r', 'p')
-  AND n.nspname IN ('app', 'billing', 'logistics', 'audit')
+  AND ${PROJECT_SCHEMA_PREDICATE}
 ORDER BY 1;
 `);
 
@@ -265,12 +405,18 @@ WHERE p.polrelid = '${t.fq}'::regclass
   }
 
   // Particiones: cada una necesita su propia cobertura.
+  //
+  // Esto es el defecto que motivó la migración 0008. PostgreSQL evalúa las
+  // políticas de la tabla CONSULTADA, no las del padre: una partición sin
+  // políticas propias es una tabla sin RLS, aunque el padre tenga FORCE. Como
+  // `audit.events` guarda el log encadenado por hash —incluidos los intentos de
+  // acceso entre inquilinos—, una partición sin cubrir no es un detalle.
   const parts = await sql(`
 SELECT n.nspname || '.' || c.relname || '|' || c.relforcerowsecurity ||
        '|' || (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid)
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE c.relispartition AND n.nspname IN ('app', 'billing', 'logistics', 'audit')
+WHERE c.relispartition AND ${PROJECT_SCHEMA_PREDICATE}
 ORDER BY 1;
 `);
 
@@ -486,6 +632,11 @@ async function testAssertionExists() {
 
 // =============================================================================
 // F · Ledger de jobs: invariantes de concurrencia y de exención de tenant
+//
+// `ops` es infraestructura de plataforma y `0011` le hizo REVOKE ALL a
+// `control_app`: la aplicación de negocio no toca el ledger. Por eso las
+// escrituras de esta sección van por la conexión administrativa, y la lectura
+// se hace por donde corresponda según el privilegio que se quiera verificar.
 // =============================================================================
 async function testJobLedger() {
   console.log('\n\u25b6 F · Ledger de jobs programados');
@@ -507,7 +658,7 @@ WHERE n.nspname = 'ops' AND c.relname IN ('jobs', 'job_runs') AND c.relkind = 'r
 
   // F.2 · El catálogo tiene los jobs declarados. Un ledger vacío es
   //       indistinguible de "nunca corrió nada".
-  const jobs = await sql(`SELECT count(*) FROM ops.jobs WHERE is_active;`);
+  const jobs = await sqlAdmin(`SELECT count(*) FROM ops.jobs WHERE is_active;`);
   assert(
     Number(jobs) >= 4,
     `ops.jobs tiene los jobs esperados (${jobs})`,
@@ -545,12 +696,15 @@ WHERE schemaname = 'ops' AND indexname = 'uq_job_runs_one_running';
 
   // F.5 · El invariante se cumple de verdad: insertar dos ejecuciones vivas del
   //       mismo job debe fallar en la segunda.
-  const dup = await trySql(`
+  const dup = await trySql(
+    `
 BEGIN;
 INSERT INTO ops.job_runs (job_code, status) VALUES ('partition.maintenance', 'running');
 INSERT INTO ops.job_runs (job_code, status) VALUES ('partition.maintenance', 'running');
 COMMIT;
-`);
+`,
+    { asAdmin: true }
+  );
 
   assert(
     !dup.ok,
@@ -559,19 +713,28 @@ COMMIT;
   );
 
   // Limpiar la fila que quedó de la prueba.
-  await sql(`DELETE FROM ops.job_runs WHERE job_code = 'partition.maintenance' AND status = 'running';`);
+  await sqlAdmin(
+    `DELETE FROM ops.job_runs WHERE job_code = 'partition.maintenance';`
+  );
 
   // F.6 · begin_job_run devuelve NULL cuando ya hay una ejecución en curso, en
   //       vez de lanzar. Es lo que permite que la segunda instancia saltee.
-  await sql(`
+  //
+  // Las dos llamadas van en transacciones separadas a propósito: la primera
+  // deja la fila viva (COMMIT), la segunda tiene que encontrarla y devolver NULL.
+  const first = await sqlAdmin(`
 BEGIN;
-SELECT ops.begin_job_run('partition.maintenance', 'test-host-1');
+SELECT COALESCE(ops.begin_job_run('partition.maintenance', 'test-host-1')::text, 'NULL') AS r;
 COMMIT;
 `);
 
-  // Se consulta en una transacción propia y se cierra explícitamente: dejar un
-  // BEGIN sin COMMIT abortaría la sesión de psql en el siguiente statement.
-  const second = await sql(`
+  assert(
+    first !== 'NULL' && first !== '',
+    'begin_job_run devuelve un id cuando el job está libre',
+    `Devolvió "${first}".`
+  );
+
+  const second = await sqlAdmin(`
 BEGIN;
 SELECT COALESCE(ops.begin_job_run('partition.maintenance', 'test-host-2')::text, 'NULL') AS r;
 ROLLBACK;
@@ -583,36 +746,51 @@ ROLLBACK;
     `Devolvió "${second}". La segunda instancia debe saltear, no fallar.`
   );
 
-  await sql(`DELETE FROM ops.job_runs WHERE job_code = 'partition.maintenance';`);
+  // La primera fila quedó viva tras el COMMIT: cerrarla es parte del contrato.
+  await sqlAdmin(`
+BEGIN;
+SELECT ops.finish_job_run(id, true, '{}'::jsonb, NULL) FROM ops.job_runs
+WHERE job_code = 'partition.maintenance' AND status = 'running';
+COMMIT;
+`);
 
   // F.7 · La vista de salud responde. Es la consulta que consume el monitoreo.
-  const health = await trySql('SELECT code, is_overdue FROM ops.v_job_health;');
-  assert(
-    health.ok,
-    'ops.v_job_health es consultable',
-    health.err || ''
-  );
+  const health = await trySql('SELECT code, is_overdue FROM ops.v_job_health;', {
+    asAdmin: true,
+  });
+  assert(health.ok, 'ops.v_job_health es consultable', health.err || '');
 
   // F.8 · Cerrar una ejecución es idempotente: no debe resucitar ni fallar.
-  await sql(`
+  await sqlAdmin(`
 BEGIN;
 INSERT INTO ops.job_runs (job_code, status) VALUES ('partition.retention', 'running');
 COMMIT;
 `);
 
-  const closed = await sql(`
+  const closed = await sqlAdmin(`
 BEGIN;
 SELECT ops.finish_job_run(id, true, '{}'::jsonb, NULL) FROM ops.job_runs
 WHERE job_code = 'partition.retention' AND status = 'running';
 COMMIT;
 `);
 
-  const closedAgain = await trySql(`
+  assert(
+    closed !== '',
+    'finish_job_run cerró la ejecución viva',
+    'Cerró 0 filas: la ejecución insertada no fue encontrada.'
+  );
+
+  // Segunda pasada: ya no hay filas en 'running', así que el SELECT no devuelve
+  // nada. El punto es que NO falle por eso — el cierre tiene que ser idempotente.
+  const closedAgain = await trySql(
+    `
 BEGIN;
 SELECT ops.finish_job_run(id, true, '{}'::jsonb, NULL) FROM ops.job_runs
 WHERE job_code = 'partition.retention';
 COMMIT;
-`);
+`,
+    { asAdmin: true }
+  );
 
   assert(
     closedAgain.ok,
@@ -620,8 +798,105 @@ COMMIT;
     closedAgain.err || ''
   );
 
-  await sql(`DELETE FROM ops.job_runs WHERE job_code = 'partition.retention';`);
-  void closed;
+  // F.9 · La aplicación NO debe poder escribir el ledger. Si `control_app`
+  //       pudiera, el ledger dejaría de ser evidencia de plataforma: la empresa
+  //       podría inventar sus propias ejecuciones.
+  const appWrite = await trySql(
+    `INSERT INTO ops.job_runs (job_code, status) VALUES ('partition.maintenance', 'running');`
+  );
+
+  assert(
+    !appWrite.ok,
+    'la aplicación no puede escribir en ops.job_runs (el ledger es de plataforma)',
+    'Si control_app pudiera insertar, el ledger dejaría de ser evidencia confiable.'
+  );
+
+  await sqlAdmin(`DELETE FROM ops.job_runs WHERE job_code IN ('partition.maintenance', 'partition.retention');`);
+}
+
+// =============================================================================
+// Guardia de rol · Defecto A
+//
+// El superusuario de PostgreSQL ignora RLS **siempre**, incluso con FORCE ROW
+// LEVEL SECURITY, y `BYPASSRLS` hace lo mismo para un rol no superusuario. Si la
+// suite corre con ese DSN, cada `SELECT count(*)` devuelve las filas de todos los
+// inquilinos, las aserciones de fuga fallan... o peor: si nadie mira, un DSN de
+// superusuario con las tablas vacías reporta OK sin haber probado nada.
+//
+// Por eso la guardia aborta en vez de advertir. Un falso negativo ruidoso es
+// infinitamente preferible a un falso positivo silencioso en la única barrera
+// que impide que una empresa lea los datos de otra.
+//
+// Se consulta `pg_has_role` en lugar del nombre del rol: así la suite funciona
+// con cualquier login (`app_login`, `app_test`, el que sea) mientras sea miembro
+// de `control_app`. Atarlo a un nombre obligaría a tocar este archivo cada vez
+// que alguien cambie cómo se llama el rol.
+// =============================================================================
+async function assertAppRole() {
+  console.log('\n\u25b6 Guardia de rol (la suite debe correr como rol de aplicación)');
+
+  const row = await sql(`
+SELECT current_user
+     || '|' || (rolsuper OR rolbypassrls)
+     || '|' || EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolcanlogin)
+     || '|' || pg_has_role(current_user, 'control_app', 'MEMBER')
+     || '|' || (SELECT count(*) FROM pg_roles WHERE rolname = 'control_app')
+FROM pg_roles
+WHERE rolname = current_user;
+`);
+
+  const [user, privileged, canLogin, isMember, parentExists] = row.split('|');
+
+  if (Number(parentExists) === 0) {
+    console.error(
+      `\n  El rol \`control_app\` no existe en esta base.\n` +
+        `  Lo crea la migración 0007. ¿Se aplicaron las migraciones?\n`
+    );
+    process.exit(2);
+  }
+
+  if (privileged === 't') {
+    console.error(
+      `\n  ABORTADO: la suite se conectó como \`${user}\`, que es superusuario o\n` +
+        `  tiene BYPASSRLS.\n\n` +
+        `  Ese rol IGNORA las políticas RLS aunque las tablas tengan FORCE ROW\n` +
+        `  LEVEL SECURITY. Correr la suite así no probaría el aislamiento: daría\n` +
+        `  "OK" con las políticas rotas.\n\n` +
+        `  Pasá un DSN de aplicación:\n` +
+        `    --dsn "postgres://app_login:...@host:5432/db"\n` +
+        `  y dejá el de superusuario sólo para --admin-dsn.\n`
+    );
+    process.exit(2);
+  }
+
+  if (isMember !== 't') {
+    console.error(
+      `\n  ABORTADO: el rol \`${user}\` no es miembro de \`control_app\`.\n\n` +
+        `  La suite necesita los privilegios de ese rol para ejercitar las\n` +
+        `  políticas reales de la aplicación. Un rol sin privilegios reportaría\n` +
+        `  "permiso denegado" en vez de medir aislamiento, y un rol demasiado\n` +
+        `  privilegiado saltearía las políticas.\n\n` +
+        `  Creá el login con:\n` +
+        `    CREATE ROLE app_login LOGIN PASSWORD '...' IN ROLE control_app;\n`
+    );
+    process.exit(2);
+  }
+
+  if (canLogin !== 't') {
+    console.warn(
+      `  Aviso: \`${user}\` no tiene LOGIN pero la conexión funcionó (¿SET ROLE desde psqlrc?).`
+    );
+  }
+
+  console.log(`  \u2713 Rol de aplicación confirmado: \`${user}\` (miembro de control_app, sin BYPASSRLS)`);
+
+  if (DSN === ADMIN_DSN) {
+    console.warn(
+      '  Aviso: --admin-dsn no se especificó; se usa el mismo DSN de aplicación\n' +
+        '         para preparar el escenario. Si la preparación falla por permisos,\n' +
+        '         pasá un DSN administrativo aparte.'
+    );
+  }
 }
 
 // =============================================================================
@@ -643,6 +918,10 @@ async function main() {
     );
     process.exit(2);
   }
+
+  // La guardia va ANTES de tocar nada: si el rol no sirve, todo lo que venga
+  // después es ruido.
+  await assertAppRole();
 
   await setup();
   const tables = await discoverTables();
