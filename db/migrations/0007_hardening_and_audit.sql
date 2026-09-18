@@ -279,12 +279,45 @@ BEGIN
     ELSE -p_quantity  -- sale_out, transfer_out, adjustment_neg
   END;
 
-  -- Upsert del saldo con lock implícito a nivel de fila
+  -- ---------------------------------------------------------------------------
+  -- Upsert del saldo — DEFECTO CORREGIDO.
+  --
+  -- La versión anterior construía la fila de INSERT con los deltas ya aplicados:
+  --
+  --   VALUES (…, GREATEST(v_delta, 0), CASE WHEN kind='reservation' THEN qty…)
+  --   ON CONFLICT (tenant_id, variant_id, warehouse_id) DO UPDATE …
+  --
+  -- y fallaba al reservar sobre una fila existente:
+  --   «el nuevo registro para la relación "stock_levels" viola la restricción
+  --    check "sl_non_negative"»
+  --   fila rechazada: (…, on_hand=0, reserved=25, available=-25, …)
+  --
+  -- La causa no es el delta sino el ORDEN en que PostgreSQL evalúa. Los CHECK
+  -- de la tabla se validan sobre la tupla PROPUESTA por el INSERT **antes** de
+  -- resolver el conflicto. Con `reservation`, `v_delta` es 0, así que la tupla
+  -- propuesta era `on_hand = GREATEST(0,0) = 0` y `reserved = 25`: viola
+  -- `reserved <= on_hand` y el motor aborta antes de llegar al `DO UPDATE`, que
+  -- era justamente el camino que iba a hacer lo correcto. En otras palabras: la
+  -- fila que el INSERT "proponía" era inválida, aunque nunca se fuera a
+  -- insertar.
+  --
+  -- Reservar stock es una operación de todos los días, y fallaba siempre que
+  -- `on_hand` fuera menor que la reserva acumulada. Se descubrió ejecutando.
+  --
+  -- La corrección propone una tupla que SIEMPRE es válida —la cantidad física
+  -- que corresponde al alta de una fila nueva— y deja todo el ajuste al
+  -- `DO UPDATE`. El caso "primera vez" no cambia: si no hay fila, `v_delta` ya
+  -- es la cantidad correcta salvo que sea negativa, y ahí `GREATEST(…, 0)` deja
+  -- el saldo en 0 en vez de violar el CHECK de no-negatividad.
+  --
+  -- `reserved` en el alta arranca en 0 aunque el movimiento sea una reserva:
+  -- una reserva sobre un depósito sin saldo no puede dar `reserved > on_hand`.
+  -- ---------------------------------------------------------------------------
   INSERT INTO app.stock_levels (tenant_id, variant_id, warehouse_id, on_hand, reserved, avg_cost)
   VALUES (
     p_tenant_id, p_variant_id, p_warehouse_id,
-    GREATEST(v_delta, 0),
-    CASE WHEN p_kind = 'reservation' THEN p_quantity ELSE 0 END,
+    GREATEST(v_delta, 0),          -- el alta sólo puede nacer con saldo no negativo
+    0,                             -- una fila nueva no tiene nada reservado
     COALESCE(p_unit_cost, 0)
   )
   ON CONFLICT (tenant_id, variant_id, warehouse_id) DO UPDATE

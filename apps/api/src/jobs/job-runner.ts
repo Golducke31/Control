@@ -357,11 +357,159 @@ export const outboxReaperJob: JobDefinition = {
   },
 };
 
+/**
+ * Reconciliación de stock: compara el saldo materializado (`app.stock_levels`)
+ * contra la suma del libro mayor (`app.stock_movements`) y reporta las
+ * diferencias.
+ *
+ * POR QUÉ EXISTE
+ *
+ * `stock_levels` es una proyección: se mantiene por upsert dentro de
+ * `app.apply_stock_movement()`, no se recalcula desde el libro. Eso lo hace
+ * rápido y lo hace frágil. Cualquier camino que escriba en `stock_levels` sin
+ * pasar por la función —una migración de datos, un `UPDATE` manual, un job de
+ * importación, un bug en un reintento— desincroniza las dos vistas sin que nada
+ * lo note. El saldo es lo que se muestra al vendedor y lo que dispara el
+ * reposicionamiento; si está mal, el negocio toma decisiones con un número
+ * inventado.
+ *
+ * POR QUÉ NO SE AUTOCORRIGE
+ *
+ * Sería tentador "arreglar" el saldo a partir del libro. No se hace: la
+ * diferencia es un SÍNTOMA, y no hay forma de saber desde acá cuál de las dos
+ * vistas es la equivocada. Si el bug fue en la escritura del libro, corregir el
+ * saldo propaga el error y destruye la única evidencia. El job reporta y deja
+ * que un humano decida. Es la misma razón por la que el ledger no se poda solo.
+ *
+ * SOBRE RLS
+ *
+ * Es un job transversal: tiene que ver todas las empresas. Corre en modo
+ * plataforma; sin él, RLS devuelve cero filas y el job reportaría "todo
+ * consistente" sin haber mirado nada — el modo de falla más traicionero del
+ * sistema. Por eso la consulta de control (`total comparados`) está abajo: un
+ * cero ahí es la señal de que el modo plataforma no se aplicó.
+ */
+export const stockReconciliationJob: JobDefinition = {
+  code: 'stock.reconciliation',
+  async run({ client, log }) {
+    // Contexto de plataforma explícito: sin esto, ambas consultas devuelven 0
+    // filas por RLS y el job reporta un falso "todo en orden".
+    await client.query('SELECT app.set_tenant_context(NULL, NULL, true)');
+
+    // La aritmética replica EXACTAMENTE la de app.apply_stock_movement():
+    //   · on_hand  → +cantidad en las entradas, -cantidad en las salidas,
+    //                0 en reserva y liberación (no mueven el físico).
+    //   · reserved → +cantidad en reserva, -cantidad en liberación.
+    // Si esta fórmula se desvía de la de la función, el job inventa diferencias
+    // en cada fila. Es la parte que hay que mantener en sincronía a mano.
+    const { rows } = await client.query<{
+      tenant_id: string;
+      variant_id: string;
+      warehouse_id: string;
+      on_hand: number;
+      reserved: number;
+      expected_on_hand: number;
+      expected_reserved: number;
+    }>(`
+      WITH ledger AS (
+        SELECT
+          m.tenant_id,
+          m.variant_id,
+          m.warehouse_id,
+          COALESCE(sum(
+            CASE m.kind
+              WHEN 'purchase_in'    THEN  m.quantity
+              WHEN 'transfer_in'    THEN  m.quantity
+              WHEN 'adjustment_pos' THEN  m.quantity
+              WHEN 'return_in'      THEN  m.quantity
+              WHEN 'sale_out'       THEN -m.quantity
+              WHEN 'transfer_out'   THEN -m.quantity
+              WHEN 'adjustment_neg' THEN -m.quantity
+              ELSE 0                -- reservation / release: no mueven el físico
+            END
+          ), 0)::int AS expected_on_hand,
+          COALESCE(sum(
+            CASE m.kind
+              WHEN 'reservation' THEN  m.quantity
+              WHEN 'release'     THEN -m.quantity
+              ELSE 0
+            END
+          ), 0)::int AS expected_reserved
+        FROM app.stock_movements m
+        GROUP BY m.tenant_id, m.variant_id, m.warehouse_id
+      )
+      SELECT
+        COALESCE(l.tenant_id,    s.tenant_id)    AS tenant_id,
+        COALESCE(l.variant_id,   s.variant_id)   AS variant_id,
+        COALESCE(l.warehouse_id, s.warehouse_id) AS warehouse_id,
+        COALESCE(s.on_hand,  0)                  AS on_hand,
+        COALESCE(s.reserved, 0)                  AS reserved,
+        COALESCE(l.expected_on_hand,  0)         AS expected_on_hand,
+        COALESCE(l.expected_reserved, 0)         AS expected_reserved
+      FROM ledger l
+      FULL OUTER JOIN app.stock_levels s
+        ON  s.tenant_id    = l.tenant_id
+        AND s.variant_id   = l.variant_id
+        AND s.warehouse_id = l.warehouse_id
+      WHERE COALESCE(s.on_hand, 0)   IS DISTINCT FROM COALESCE(l.expected_on_hand, 0)
+         OR COALESCE(s.reserved, 0)  IS DISTINCT FROM COALESCE(l.expected_reserved, 0)
+      ORDER BY 1, 2, 3
+    `);
+
+    // Control de cordura: cuántas combinaciones se compararon en total. Sin
+    // esto, "0 diferencias" es ambiguo — puede significar "todo bien" o "RLS no
+    // me dejó ver nada". Con el conteo, los dos casos se distinguen.
+    const compared = await client.query<{ n: string }>(`
+      SELECT (
+        (SELECT count(*) FROM app.stock_levels)
+        + (SELECT count(DISTINCT (tenant_id, variant_id, warehouse_id))
+             FROM app.stock_movements)
+      )::text AS n
+    `);
+    const totalCompared = Number(compared.rows[0]?.n ?? '0');
+
+    if (rows.length > 0) {
+      // Se listan los primeros para que el log sirva para investigar sin tener
+      // que consultar la base. El resto queda en `outcome.differences`, que es
+      // lo que el alerting lee.
+      for (const d of rows.slice(0, 20)) {
+        log(
+          `diferencia: inquilino ${d.tenant_id} variante ${d.variant_id} ` +
+            `depósito ${d.warehouse_id} — saldo físico ${d.on_hand} vs libro ` +
+            `${d.expected_on_hand}; reservado ${d.reserved} vs libro ${d.expected_reserved}`
+        );
+      }
+      if (rows.length > 20) {
+        log(`… y ${rows.length - 20} diferencia(s) más`);
+      }
+    }
+
+    return {
+      compared: totalCompared,
+      differences: rows.length,
+      // Detalle acotado: `outcome` es jsonb en el ledger y crece con cada
+      // corrida. Guardar miles de filas por día haría del ledger una tabla de
+      // datos de negocio en vez de un registro de ejecuciones.
+      sample: rows.slice(0, 50).map((d) => ({
+        tenantId: d.tenant_id,
+        variantId: d.variant_id,
+        warehouseId: d.warehouse_id,
+        onHand: d.on_hand,
+        bookOnHand: d.expected_on_hand,
+        reserved: d.reserved,
+        bookReserved: d.expected_reserved,
+      })),
+      truncated: rows.length > 50,
+    };
+  },
+};
+
 /** Catálogo de jobs que expone este runner. */
 export const JOB_DEFINITIONS: JobDefinition[] = [
   partitionMaintenanceJob,
   partitionRetentionJob,
   certificateExpiryJob,
+  stockReconciliationJob,
   outboxReaperJob,
 ];
 
@@ -377,5 +525,9 @@ export const JOB_SCHEDULE: Record<string, string> = {
   'partition.maintenance': '0 3 1 * *', // día 1 de cada mes, 03:00
   'partition.retention': '0 4 1 * *', // día 1 de cada mes, 04:00
   'certificate.expiry': '0 8 * * *', // diario, 08:00
+  // La reconciliación corre a las 04:30, después del mantenimiento de
+  // particiones (03:00) y de la purga (04:00). El orden importa: si corriera
+  // antes, compararía contra un libro que está a punto de cambiar.
+  'stock.reconciliation': '30 4 * * *', // diario, 04:30
   'outbox.reaper': '*/15 * * * *', // cada 15 minutos
 };
