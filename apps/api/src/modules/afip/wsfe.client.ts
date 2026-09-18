@@ -123,15 +123,19 @@ export interface WsfeIssueRequest {
   docNumber: string | null;
   receptorName: string;
   receptorTaxCondition: number;
+  // `| undefined` explícito: `exactOptionalPropertyTypes` no acepta un
+  // `undefined` literal en `campo?: T`. El driver arma el request con estas
+  // claves siempre presentes, y su valor es genuinamente ausente cuando el
+  // concepto es 1 (Productos) o cuando no hay vencimiento de pago.
   /** Obligatorio cuando concepto <> 1 */
-  serviceFrom?: Date;
-  serviceTo?: Date;
-  paymentDueDate?: Date;
+  serviceFrom?: Date | undefined;
+  serviceTo?: Date | undefined;
+  paymentDueDate?: Date | undefined;
   currency: string;
   fxRate: number;
   items: WsfeItem[];
   /** Correlativo asociado (Nota de Crédito/Débito) */
-  associatedCbte?: { cbteTipo: number; ptoVenta: number; number: number };
+  associatedCbte?: { cbteTipo: number; ptoVenta: number; number: number } | undefined;
   idempotencyKey: string;
 }
 

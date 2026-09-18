@@ -1,0 +1,29 @@
+{
+  "name": "control",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Control · Plataforma SaaS multiempresa para gestión comercial, stock, logística y facturación electrónica.",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit && npm run typecheck --workspace @control/api",
+    "test": "npm run test --workspace @control/api",
+    "build": "npm run build --workspace @control/api",
+    "verify:partitions": "node tools/check-partitioned-tables.mjs",
+    "verify:composite-fks": "node tools/check-composite-fks.mjs",
+    "verify:migration-order": "node tools/check-migration-order.mjs",
+    "verify:suite-sql": "node tools/check-suite-sql.mjs",
+    "verify:workflow": "node tools/validate-workflow.mjs",
+    "verify": "npm run verify:composite-fks && npm run verify:migration-order && npm run verify:partitions && npm run verify:suite-sql && npm run verify:workflow"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "@types/pg": "^8.11.6",
+    "typescript": "^5.6.0"
+  }
+}

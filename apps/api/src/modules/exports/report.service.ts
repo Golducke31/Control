@@ -324,6 +324,20 @@ export interface ExcelJsLike {
   };
 }
 
+/**
+ * Contrato mínimo de una hoja de cálculo.
+ *
+ * Se declara acá en vez de importar los tipos de `exceljs` porque el módulo no
+ * depende de la librería: el escritor XLSX está construido a mano sobre el
+ * formato OOXML. Esto es deliberado y tiene un costo —no se cubren features
+ * avanzadas— pero elimina una dependencia pesada del camino de exportación.
+ * Si en producción se adopta `exceljs`, este contrato se reemplaza por sus
+ * tipos reales y el resto del servicio no cambia.
+ *
+ * Los campos opcionales llevan `| undefined` explícito: el escritor asigna
+ * `ws.workbook` siempre, y con `exactOptionalPropertyTypes` un `campo?: T` no
+ * acepta un `undefined` literal.
+ */
 interface WorksheetLike {
   columns: Array<{ header: string; key: string; width: number; style?: Record<string, unknown> }>;
   mergeCells(range: string): void;
@@ -343,9 +357,9 @@ interface WorksheetLike {
   };
   addRow(values: unknown[], style?: Record<string, unknown>): void;
   eachRow(options: Record<string, unknown>, cb: (row: unknown, n: number) => void): void;
-  autoFilter?: Record<string, unknown>;
-  views?: Array<Record<string, unknown>>;
-  workbook?: { xlsx: { writeBuffer(): Promise<ArrayBuffer> } };
+  autoFilter?: Record<string, unknown> | undefined;
+  views?: Array<Record<string, unknown>> | undefined;
+  workbook?: { xlsx: { writeBuffer(): Promise<ArrayBuffer> } } | undefined;
 }
 
 const NUM_FMT: Record<ColumnDef<unknown>['type'], string> = {
@@ -486,7 +500,13 @@ export class XlsxExportService {
 // =============================================================================
 // Exportación PDF
 // =============================================================================
-export interface PdfBlock =
+/*
+ * `type` y no `interface`: `PdfBlock` es una unión de literales, y `interface`
+ * no puede declarar una unión — abre un cuerpo entre llaves, no una lista de
+ * alternativas. Con `interface X = ...` el parser no espera un `=` y falla con
+ * un error de sintaxis que no menciona la causa real.
+ */
+export type PdfBlock =
   | { type: 'kpi-grid'; items: Array<{ label: string; value: string; delta?: string }> }
   | { type: 'table'; columns: string[]; rows: Array<Array<string | number>>; numericColumns?: number[] }
   | { type: 'chart'; svg: string; caption?: string }

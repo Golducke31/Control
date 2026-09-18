@@ -48,8 +48,17 @@ export interface JobDefinition {
 export interface JobRunResult {
   code: string;
   status: 'succeeded' | 'failed' | 'skipped';
-  outcome?: Record<string, unknown>;
-  error?: string;
+  /**
+   * `| undefined` explícito y no sólo `?`: con `exactOptionalPropertyTypes`
+   * —que está activado a propósito— `campo?: T` significa "la clave puede no
+   * estar", no "la clave puede valer undefined". El constructor de abajo arma
+   * el objeto con las tres claves siempre presentes, y sin esta anotación el
+   * tipo sería mentira en la dirección peligrosa: prometería que `error` está
+   * ausente cuando en realidad está presente y vale `undefined`, y cualquier
+   * `'error' in result` daría true con un valor vacío.
+   */
+  outcome?: Record<string, unknown> | undefined;
+  error?: string | undefined;
   durationMs: number;
 }
 

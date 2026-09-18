@@ -43,12 +43,16 @@ export interface TrackingEvent {
   status: ShipmentStatus;
   eventCode: string;
   description: string;
-  geo?: { lat: number; lng: number };
-  speedKmh?: number;
-  heading?: number;
+  // `| undefined` explícito en los opcionales: `exactOptionalPropertyTypes` no
+  // acepta un `undefined` literal en `campo?: T`, y estos eventos se construyen
+  // con la clave presente y valor `undefined` cuando el hecho no tiene posición
+  // (un cambio de estado administrativo, por ejemplo).
+  geo?: { lat: number; lng: number } | undefined;
+  speedKmh?: number | undefined;
+  heading?: number | undefined;
   actorKind: 'system' | 'user' | 'driver' | 'customer' | 'webhook';
   occurredAt: string;
-  payload?: Record<string, unknown>;
+  payload?: Record<string, unknown> | undefined;
 }
 
 export interface DriverPing {
@@ -68,11 +72,16 @@ export type RealtimeRole = 'operator' | 'driver' | 'customer';
 interface Subscription {
   tenantId: string;
   role: RealtimeRole;
-  userId?: string;
+  // `| undefined` explícito en los campos opcionales de este archivo: con
+  // `exactOptionalPropertyTypes` (activo a propósito) `campo?: T` significa
+  // "la clave puede faltar", no "puede valer undefined". Acá la clave se
+  // construye siempre a partir de una sesión, y `undefined` es un valor
+  // legítimo cuando el rol no tiene usuario asociado.
+  userId?: string | undefined;
   /** Vacío = todos los envíos del tenant (operador). */
   shipmentIds: Set<string>;
   /** Sólo para `driver`: el conductor ve únicamente sus asignaciones. */
-  driverUserId?: string;
+  driverUserId?: string | undefined;
 }
 
 // =============================================================================
@@ -137,17 +146,19 @@ export class RealtimeHub {
     private readonly deps: {
       /** Verifica acceso a un envío concreto contra la DB (RLS + RBAC). */
       canAccessShipment(args: {
-        tenantId: string; shipmentId: string; role: RealtimeRole; userId?: string;
+        tenantId: string; shipmentId: string; role: RealtimeRole; userId?: string | undefined;
       }): Promise<boolean>;
       /** Lista de envíos visibles para el rol (driver: sólo los suyos). */
       listVisibleShipments(args: {
-        tenantId: string; role: RealtimeRole; userId?: string;
+        tenantId: string; role: RealtimeRole; userId?: string | undefined;
       }): Promise<string[]>;
       /** Persiste el evento antes de publicarlo. */
       persistEvent(event: TrackingEvent): Promise<void>;
       /** Registra intentos de acceso cruzado. */
       securityLog(entry: {
-        tenantId: string; userId?: string; kind: string; detail: string; severity: 'warning' | 'critical';
+        tenantId: string;
+        userId?: string | undefined;
+        kind: string; detail: string; severity: 'warning' | 'critical';
       }): Promise<void>;
       now?: () => Date;
     },
@@ -316,6 +327,46 @@ export class RealtimeHub {
     await this.deps.persistEvent(full);   // si esto falla, no se emite nada
     this.bus.publish(full);
     return full;
+  }
+
+  /**
+   * Publica una actualización de posición. Va por un camino distinto del de
+   * `emit()` a propósito: los pings de GPS tienen otra frecuencia (segundos, no
+   * minutos) y otros consumidores (el mapa, no el timeline).
+   *
+   * NO persiste ni pasa por `persistEvent`. Es deliberado: `logistics.
+   * position_pings` es una tabla particionada de alta frecuencia, y escribir el
+   * historial de posiciones es responsabilidad de otro camino que puede
+   * agrupar y descartar. Persistir cada ping acá acoplaría el stream en vivo a
+   * la escritura en disco, y una base lenta haría que el mapa se congelara.
+   *
+   * Se publica por el mismo bus con `eventCode: 'location'` para que el cliente
+   * discrimine: el timeline ignora los eventos de posición y el mapa ignora el
+   * resto.
+   */
+  emitLocation(loc: {
+    tenantId: string;
+    shipmentId: string;
+    lat: number;
+    lng: number;
+    speedKmh?: number | undefined;
+    heading?: number | undefined;
+    recordedAt: string;
+  }): void {
+    this.bus.publish({
+      id: randomUUID(),
+      tenantId: loc.tenantId,
+      shipmentId: loc.shipmentId,
+      trackingCode: '',
+      status: 'in_transit',
+      eventCode: 'location',
+      description: 'Actualización de posición',
+      geo: { lat: loc.lat, lng: loc.lng },
+      speedKmh: loc.speedKmh,
+      heading: loc.heading,
+      actorKind: 'driver',
+      occurredAt: loc.recordedAt,
+    });
   }
 
   stats(): { connections: number; tenants: number; trackedShipments: number } {
@@ -586,34 +637,3 @@ export class TrackingService {
     });
   }
 }
-
-// Extensión del hub para pings de ubicación (canal separado del de estados,
-// porque tienen frecuencias y consumidores distintos)
-declare module './realtime.gateway.js' {
-  interface RealtimeHub {
-    emitLocation(loc: {
-      tenantId: string; shipmentId: string;
-      lat: number; lng: number; speedKmh?: number;
-      heading?: number; recordedAt: string;
-    }): void;
-  }
-}
-
-RealtimeHub.prototype.emitLocation = function (this: RealtimeHub, loc) {
-  // Se reutiliza el bus con un tipo de evento distinto. El frontend discrimina
-  // por `event:` (SSE) o por `type` (WS) y sólo pinta el marcador del mapa.
-  (this as unknown as { bus: TenantEventBus }).bus.publish({
-    id: randomUUID(),
-    tenantId: loc.tenantId,
-    shipmentId: loc.shipmentId,
-    trackingCode: '',
-    status: 'in_transit',
-    eventCode: 'location',
-    description: 'Actualización de posición',
-    geo: { lat: loc.lat, lng: loc.lng },
-    speedKmh: loc.speedKmh,
-    heading: loc.heading,
-    actorKind: 'driver',
-    occurredAt: loc.recordedAt,
-  });
-};

@@ -78,12 +78,52 @@ export function scheduleIntervalMs(cron: string): number {
         'Se esperan 5 campos (minuto hora día-del-mes mes día-de-semana).'
     );
   }
-  const [minute, hour, dom] = parts;
+
+  // TypeScript no puede deducir del `length` que los índices existen: con
+  // `noUncheckedIndexedAccess` el destructuring de un array da `string | undefined`.
+  // En vez de un `!` —que apagaría la verificación y podría ocultar un bug real
+  // si alguien cambia el chequeo de arriba— se valida de nuevo acá. Es redundante
+  // a propósito: la redundancia es lo que hace que el tipo sea verdadero.
+  const [minute, hour, dom, month, dow] = parts;
+  if (
+    minute === undefined || hour === undefined || dom === undefined ||
+    month === undefined || dow === undefined
+  ) {
+    throw new Error(`Expresión de cadencia mal formada: "${cron}".`);
+  }
+
+  // --- DEFECTO CORREGIDO ------------------------------------------------------
+  // Las ramas de abajo sólo miraban `minute`, `hour` y `dom`. Los campos `mes`
+  // y `día-de-semana` se ignoraban por completo, y ahí está el problema:
+  //
+  //   "*/15 * * * MON"  → el campo `dow` es MON
+  //
+  // La rama de "cada N minutos" sólo exigía `hour === '*'` y `dom === '*'`, que
+  // se cumplen. Devolvía 15 minutos, en silencio, para una expresión que
+  // significa "cada 15 minutos **los lunes**". El job habría corrido 96 veces
+  // por día en vez de 24 por semana. Es exactamente el modo de falla que esta
+  // función existe para evitar: no un error, sino un número plausible y
+  // equivocado.
+  //
+  // Ambos campos tienen que ser comodín exhaustivo para que una cadencia fija
+  // sea correcta. Se rechaza cualquier otra cosa en vez de aproximarla.
+  const wideMonth = month === '*';
+  const wideDow = dow === '*' || dow === '?';
+  if (!wideMonth || !wideDow) {
+    throw new Error(
+      `Expresión de cadencia no soportada: "${cron}". ` +
+        'Los campos mes y día-de-semana deben ser "*": este scheduler evalúa ' +
+        'cadencias de intervalo fijo, y una restricción de calendario haría que ' +
+        'el intervalo no sea constante. Si un job necesita correr sólo ciertos ' +
+        'días, agregar la forma explícitamente acá en vez de aproximarla.'
+    );
+  }
 
   // `*/N * * * *` → cada N minutos
-  const everyMinutes = minute.match(/^\*\/(\d+)$/);
-  if (everyMinutes && hour === '*' && dom === '*') {
-    return Number(everyMinutes[1]) * 60_000;
+  const everyMinutes = /^\*\/(\d+)$/.exec(minute);
+  const everyN = everyMinutes?.[1];
+  if (everyN !== undefined) {
+    return Number(everyN) * 60_000;
   }
 
   // `M H * * *` → una vez por día
@@ -114,8 +154,12 @@ export interface SchedulerOptions {
   tickMs?: number;
   /** Si es true, corre un solo barrido y termina. */
   once?: boolean;
-  /** Filtra por código de job. Sin esto, se consideran todos. */
-  only?: string[];
+  /**
+   * Filtra por código de job. Sin esto, se consideran todos.
+   * `| undefined` explícito por `exactOptionalPropertyTypes`: el worker pasa la
+   * clave siempre, con `undefined` cuando no se usó `--only`.
+   */
+  only?: string[] | undefined;
 }
 
 /**

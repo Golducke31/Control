@@ -60,9 +60,19 @@ const args = process.argv.slice(2);
 const ONCE = args.includes('--once');
 const VERBOSE = args.includes('--verbose') || args.includes('-v');
 
+/**
+ * Lee `--flag valor`. Devuelve `null` si el flag no está o si es el último
+ * argumento sin valor.
+ *
+ * El chequeo es `!== undefined` y no una prueba de veracidad: `args[i + 1]` es
+ * `string | undefined`, y con `? :` un valor vacío (`--only ""`) se confundiría
+ * con la ausencia del flag. Son casos distintos y el mensaje de error cambia.
+ */
 function readFlag(name: string): string | null {
   const i = args.indexOf(name);
-  return i >= 0 && args[i + 1] ? args[i + 1] : null;
+  if (i < 0) return null;
+  const value = args[i + 1];
+  return value !== undefined ? value : null;
 }
 
 const tickMs = Number(readFlag('--every') ?? '60000');

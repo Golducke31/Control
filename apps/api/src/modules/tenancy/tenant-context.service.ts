@@ -115,8 +115,12 @@ export class TenantContextService {
         kind: string;
         detail: string;
         severity: 'warning' | 'critical';
-        userId?: string;
-        tenantId?: string;
+        // Mismo caso que en `TenancyMiddleware`: `| undefined` explícito por
+        // `exactOptionalPropertyTypes`.
+        userId?: string | undefined;
+        tenantId?: string | undefined;
+        ipAddress?: string | undefined;
+        userAgent?: string | undefined;
       }): Promise<void>;
       now?: () => number;
     },
@@ -267,6 +271,18 @@ export interface HttpResponse {
   status(code: number): HttpResponse;
   json(body: unknown): void;
   setHeader(name: string, value: string): void;
+  /**
+   * Si la respuesta ya empezó a enviarse.
+   *
+   * Opcional porque el contrato es el mínimo que la aplicación necesita y no
+   * todos los adaptadores lo exponen. El manejador de errores lo consulta antes
+   * de escribir: llamar a `status().json()` sobre una respuesta ya enviada
+   * lanza `ERR_HTTP_HEADERS_SENT`, y eso convertiría un error de negocio en un
+   * error de infraestructura. Sin el dato, la única opción segura es asumir que
+   * ya se envió y no intentar responder — de ahí que la ausencia se trate como
+   * "no puedo responder" y no como "puedo".
+   */
+  readonly headersSent?: boolean;
 }
 
 /**
@@ -287,8 +303,18 @@ export class TenancyMiddleware {
     private readonly tenancy: TenantContextService,
     private readonly deps: {
       securityLog(entry: {
-        kind: string; detail: string; severity: 'warning' | 'critical';
-        userId?: string; tenantId?: string; ipAddress?: string; userAgent?: string;
+        kind: string;
+        detail: string;
+        severity: 'warning' | 'critical';
+        // `| undefined` explícito: con `exactOptionalPropertyTypes` —activo a
+        // propósito— `campo?: T` no acepta un `undefined` literal, y los
+        // llamadores construyen el objeto con la clave siempre presente.
+        // El dato es genuinamente opcional en el origen (un request puede no
+        // traer IP ni User-Agent), así que el tipo tiene que decir eso.
+        userId?: string | undefined;
+        tenantId?: string | undefined;
+        ipAddress?: string | undefined;
+        userAgent?: string | undefined;
       }): Promise<void>;
     },
   ) {}
@@ -476,11 +502,4 @@ async function safeRollback(conn: DbConnection): Promise<void> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-// Augmentación para el handler de respuesta (usado en el catch)
-declare module './tenancy.middleware.js' {
-  interface HttpResponse {
-    readonly headersSent?: boolean;
-  }
 }

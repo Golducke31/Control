@@ -220,8 +220,16 @@ jobs:
         run: node tests/isolation/run.mjs --verbose
 
   # ---------------------------------------------------------------------------
-  # 4 · TypeScript de la API. Se compila sin emitir para detectar errores de
-  #     tipos. Se activa cuando exista `package.json` en la raíz.
+  # 4 · TypeScript de la API.
+  #
+  #     Existía un job "probe" que salteaba todo si no encontraba `package.json`
+  #     en la raíz. No había ninguno, así que el job nunca corrió: el pipeline
+  #     mostraba verde sin haber compilado una sola línea. Al crear el manifiesto
+  #     real aparecieron ~20 errores de tipo que llevaban ahí desde el principio
+  #     —incluidas dos llamadas a métodos inexistentes y una cadencia de cron que
+  #     ignoraba el día de la semana—. Un chequeo que puede pasar por no hacer
+  #     nada no es una barrera. Ahora el job falla si no hay `package.json`,
+  #     porque la ausencia es el defecto, no el caso a tolerar.
   # ---------------------------------------------------------------------------
   typecheck:
     name: TypeScript
@@ -229,32 +237,66 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detectar proyecto Node
-        id: probe
+      - name: Exigir manifiesto
         run: |
-          if [ -f package.json ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "Sin package.json todavía: se omite el typecheck."
+          set -euo pipefail
+          if [ ! -f package.json ]; then
+            echo "::error::Falta package.json en la raíz. Sin él, el typecheck no puede correr."
+            exit 1
           fi
 
       - uses: actions/setup-node@v4
-        if: steps.probe.outputs.present == 'true'
         with:
           node-version: '22'
           cache: npm
 
       - name: Instalar dependencias
-        if: steps.probe.outputs.present == 'true'
         run: npm ci
 
-      - name: tsc --noEmit
-        if: steps.probe.outputs.present == 'true'
+      - name: tsc --noEmit (raíz)
         run: npx tsc --noEmit
 
+      - name: tsc --noEmit (API)
+        run: npm run typecheck --workspace @control/api
+
   # ---------------------------------------------------------------------------
-  # 5 · Guardia de secretos: certificados AFIP y claves nunca deben entrar al
+  # 5 · Tests unitarios. No existía ninguno. Cubren la lógica que no necesita
+  #     base de datos: hoy, la evaluación de cadencias del scheduler —que es
+  #     donde se encontró un defecto real: `*/15 * * * MON` devolvía 15 minutos,
+  #     ignorando el día de la semana, y habría corrido el job 96 veces por día
+  #     en vez de 24 veces por semana.
+  # ---------------------------------------------------------------------------
+  unit:
+    name: Tests unitarios
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar tests
+        run: npm test
+
+      - name: Verificar que hay tests (no un verde vacío)
+        run: |
+          set -euo pipefail
+          OUT=$(npm test 2>&1)
+          echo "$OUT" | tail -20
+          PASS=$(echo "$OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p' | tail -1)
+          if [ -z "$PASS" ] || [ "$PASS" -lt 1 ]; then
+            echo "::error::No se ejecutó ningún test. Un job verde sin tests es peor que uno ausente."
+            exit 1
+          fi
+          echo "tests ejecutados: $PASS"
+
+  # ---------------------------------------------------------------------------
+  # 6 · Guardia de secretos: certificados AFIP y claves nunca deben entrar al
   #     repositorio. Un `.pem` commiteado es un incidente de seguridad.
   # ---------------------------------------------------------------------------
   secret-guard:

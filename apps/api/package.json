@@ -1,0 +1,27 @@
+{
+  "name": "@control/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API de Control. Multiempresa con aislamiento RLS en el motor.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build:test && node --test \"dist-test/**/*.test.js\"",
+    "pretest": "npm run typecheck",
+    "jobs": "node dist/jobs/worker.js"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.4.1",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "@types/pg": "^8.11.6",
+    "typescript": "^5.6.0"
+  }
+}
