@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * =============================================================================
- * Control · Suite de invariantes del núcleo contable (puerta de salida E1)
+ * Control · Suite de invariantes del núcleo contable (puertas de salida E1 y E2)
  * -----------------------------------------------------------------------------
  * QUÉ PRUEBA
  *
@@ -13,7 +13,12 @@
  * escribir un dato inválido?". Si la respuesta es sí, la garantía es decorativa.
  *
  * La puerta de salida de E1 en el plan es: "Balance cuadra y cero asientos
- * descuadrados". Eso se mide acá, no se declara.
+ * descuadrados". La de E2 es: "Cero hechos sin asiento en un escenario
+ * completo". Las dos se miden acá, no se declaran.
+ *
+ * Las invariantes 11 a 14 cubren E2 (`0013`, ADR
+ * `docs/adr/0002-motor-asientos-automaticos.md`): idempotencia del generador,
+ * traducción hecho → líneas, omisión del IVA 0% y la vista de brechas.
  *
  * POR QUÉ CADA PRUEBA ES UNA CONEXIÓN APARTE
  *
@@ -257,6 +262,8 @@ async function setup() {
   await sqlAdmin(`
 BEGIN;
 SELECT app.set_tenant_context(NULL, NULL, true);
+DELETE FROM accounting.account_roles    WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM accounting.mapping_rules    WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM accounting.journal_lines   WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM accounting.account_balances WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM accounting.journal_entries WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
@@ -307,6 +314,11 @@ BEGIN
   FROM generate_series(1, 12) AS m(n);
 
   PERFORM accounting.seed_tenant_chart_of_accounts(v_t);
+
+  -- E2: roles + reglas de mapeo hecho → asiento. Sin esto, el generador
+  -- automático no tiene a qué cuenta imputar cada línea y falla —que es lo
+  -- correcto—, así que sin sembrarlo no se puede probar la idempotencia.
+  PERFORM accounting.seed_tenant_accounting_config(v_t);
 END $$;
 `
       )
@@ -326,18 +338,27 @@ END $$;
       TENANT_A,
       `
 SELECT (SELECT count(*) FROM accounting.periods  WHERE tenant_id = '${TENANT_A}')
-     || '|' || (SELECT count(*) FROM accounting.accounts WHERE tenant_id = '${TENANT_A}');
+     || '|' || (SELECT count(*) FROM accounting.accounts WHERE tenant_id = '${TENANT_A}')
+     || '|' || (SELECT count(*) FROM accounting.account_roles WHERE tenant_id = '${TENANT_A}')
+     || '|' || (SELECT count(*) FROM accounting.mapping_rules WHERE tenant_id = '${TENANT_A}');
 `
     )
   );
 
-  const [periods, accounts] = counts.split('|');
+  const [periods, accounts, roles, rules] = counts.split('|');
   console.log(`  \u2713 Empresa A: ${periods} períodos, ${accounts} cuentas copiadas de la plantilla`);
+  console.log(`  \u2713 Empresa A: ${roles} roles contables, ${rules} reglas de mapeo (E2)`);
 
   assert(
     Number(periods) === 12 && Number(accounts) > 50,
     'la preparación dejó el ejercicio, los 12 períodos y el plan de cuentas',
     `períodos=${periods} cuentas=${accounts}`
+  );
+
+  assert(
+    Number(roles) === 11 && Number(rules) === 11,
+    'la configuración contable E2 quedó sembrada (11 roles, 11 reglas)',
+    `roles=${roles} reglas=${rules}`
   );
 }
 
@@ -870,6 +891,260 @@ COMMIT;
 }
 
 // =============================================================================
+// Invariante 11 · Idempotencia: un hecho, un asiento (garantía central de E2)
+// -----------------------------------------------------------------------------
+// La puerta de salida de E2 en el plan es "cero hechos sin asiento en un
+// escenario completo". Su contracara —igual de grave y mucho menos visible— es
+// "un hecho con dos asientos": nada falla, el libro cuadra, y la ganancia
+// aparece duplicada sin que nadie lo note. Esta prueba ataca eso.
+//
+// Se llama al generador TRES veces con el mismo `source_id`. Un generador
+// correcto devuelve el mismo asiento las tres veces y deja UNA fila. La
+// garantía vive en el índice único parcial `journal_entries_one_per_source`,
+// no en la lógica de la función: por eso da igual si el reproceso viene de un
+// job, de un reintento de HTTP o de un `<RETURNING>` reejecutado a mano.
+// =============================================================================
+async function testSourceIdempotency() {
+  console.log('\n\u25b6 Invariante 11 · idempotencia: un hecho, un asiento');
+
+  const SOURCE_ID = '00000000-0000-4000-c000-00000000faca';
+
+  const res = await trySql(
+    withTenant(
+      TENANT_A,
+      `
+DO $$
+DECLARE
+  v_t uuid := '${TENANT_A}';
+  v_src uuid := '${SOURCE_ID}';
+  v_amounts jsonb := '{"total": 121000.00, "subtotal": 100000.00, "tax_total": 21000.00}'::jsonb;
+  v_1 accounting.journal_entries;
+  v_2 accounting.journal_entries;
+  v_3 accounting.journal_entries;
+  v_n integer;
+BEGIN
+  v_1 := accounting.post_entry_for_source(
+    v_t, 'invoice', v_src, 'invoice', CURRENT_DATE, 'Factura 1', v_amounts);
+  v_2 := accounting.post_entry_for_source(
+    v_t, 'invoice', v_src, 'invoice', CURRENT_DATE, 'Factura 1 (reproceso)', v_amounts);
+  v_3 := accounting.post_entry_for_source(
+    v_t, 'invoice', v_src, 'invoice', CURRENT_DATE, 'Factura 1 (tercera vez)', v_amounts);
+
+  SELECT count(*) INTO v_n FROM accounting.journal_entries e
+   WHERE e.tenant_id = v_t AND e.source_id = v_src;
+
+  IF v_1.id IS DISTINCT FROM v_2.id THEN
+    RAISE EXCEPTION 'El segundo llamado creo un asiento distinto (%). Deberia devolver el mismo.', v_2.id;
+  END IF;
+  IF v_1.id IS DISTINCT FROM v_3.id THEN
+    RAISE EXCEPTION 'El tercer llamado creo un asiento distinto (%).', v_3.id;
+  END IF;
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'El hecho quedo con % asientos en vez de 1.', v_n;
+  END IF;
+END $$;
+`
+    )
+  );
+
+  assert(
+    res.ok,
+    'tres llamados con el mismo source_id devuelven el mismo asiento y dejan 1 sola fila',
+    res.err
+  );
+
+  if (!res.ok) {
+    const line = res.err.split('\n').find((l) => l.includes('EXCEPTION') || l.includes('ERROR'));
+    if (line && VERBOSE) console.log(`      ${line.trim()}`);
+  }
+
+  // El asiento generado tiene que usar el vocabulario del enum de `0012`.
+  // El defecto corregido pasaba el literal 'automatic', que el enum no tiene.
+  const source = await sql(
+    withTenant(
+      TENANT_A,
+      `
+SELECT e.source::text || '|' || e.source_type
+  FROM accounting.journal_entries e
+ WHERE e.tenant_id = '${TENANT_A}' AND e.source_id = '${SOURCE_ID}';
+`
+    )
+  );
+
+  assert(
+    source === 'invoice|invoice',
+    'el asiento automático usa el enum entry_source del hecho, no un literal fuera del vocabulario',
+    `source|source_type = ${source} (esperado invoice|invoice)`
+  );
+}
+
+// =============================================================================
+// Invariante 12 · El mapeo hecho → asiento produce las líneas correctas
+// -----------------------------------------------------------------------------
+// Verifica la traducción completa de una factura: Debe Cuentas a cobrar por el
+// total, Haber Ventas por el neto y Haber IVA débito fiscal por el impuesto.
+// No alcanza con que el asiento cuadre: un mapeo con las cuentas invertidas
+// también cuadra, y es un error contable grave que nadie vería en el balance.
+// =============================================================================
+async function testMappingProducesCorrectLines() {
+  console.log('\n\u25b6 Invariante 12 · el mapeo imputa cada línea a la cuenta correcta');
+
+  const detalle = await sql(
+    withTenant(
+      TENANT_A,
+      `
+SELECT string_agg(
+         a.code || '=' || l.debit::numeric(14,2)::text || '/' || l.credit::numeric(14,2)::text,
+         ' ' ORDER BY a.code)
+  FROM accounting.journal_lines l
+  JOIN accounting.journal_entries e
+    ON e.tenant_id = l.tenant_id AND e.id = l.entry_id
+  JOIN accounting.accounts a
+    ON a.tenant_id = l.tenant_id AND a.id = l.account_id
+ WHERE e.tenant_id = '${TENANT_A}'
+   AND e.source_id = '00000000-0000-4000-c000-00000000faca';
+`
+    )
+  );
+
+  // 1.1.3.01 Cuentas a cobrar      Debe 121000
+  // 2.1.2.01 IVA débito fiscal     Haber 21000
+  // 4.1.1.01 Ventas                Haber 100000
+  const esperado = '1.1.3.01=121000.00/0.00 2.1.2.01=0.00/21000.00 4.1.1.01=0.00/100000.00';
+
+  assert(
+    detalle === esperado,
+    'la factura imputa CxC por el total, Ventas por el neto e IVA débito por el impuesto',
+    `Obtenido: ${detalle}\nEsperado: ${esperado}`
+  );
+
+  // Y el asiento cuadra, verificado sobre el motor y no sobre la función.
+  const cuadre = await sql(
+    withTenant(
+      TENANT_A,
+      `
+SELECT count(*)::text FROM (
+  SELECT l.entry_id
+    FROM accounting.journal_lines l
+    JOIN accounting.journal_entries e
+      ON e.tenant_id = l.tenant_id AND e.id = l.entry_id
+   WHERE e.tenant_id = '${TENANT_A}' AND e.source_id = '00000000-0000-4000-c000-00000000faca'
+   GROUP BY l.entry_id
+  HAVING COALESCE(sum(l.debit), 0) <> COALESCE(sum(l.credit), 0)
+) d;
+`
+    )
+  );
+
+  assert(cuadre === '0', 'el asiento generado está cuadrado', `descuadrados: ${cuadre}`);
+}
+
+// =============================================================================
+// Invariante 13 · IVA 0% no genera línea (AFIP rechaza la alícuota Id 3)
+// -----------------------------------------------------------------------------
+// El ADR 0001 y el motor de mapeo omiten deliberadamente los importes en cero.
+// Si se generara una línea de IVA por 0, AFIP rechazaría el comprobante con
+// «el campo Iva no debe incluir la alícuota 0%». La prueba usa una factura sin
+// IVA y exige DOS líneas (CxC y Ventas), no tres.
+// =============================================================================
+async function testZeroVatLineOmitted() {
+  console.log('\n\u25b6 Invariante 13 · IVA 0% no genera línea de impuesto');
+
+  const SOURCE_ID = '00000000-0000-4000-c000-00000000fadb';
+
+  const res = await trySql(
+    withTenant(
+      TENANT_A,
+      `
+DO $$
+DECLARE
+  v_t uuid := '${TENANT_A}';
+  v_src uuid := '${SOURCE_ID}';
+  v_n integer;
+BEGIN
+  PERFORM accounting.post_entry_for_source(
+    v_t, 'invoice', v_src, 'invoice', CURRENT_DATE, 'Factura sin IVA',
+    '{"total": 50000.00, "subtotal": 50000.00, "tax_total": 0.00}'::jsonb);
+
+  SELECT count(*) INTO v_n
+    FROM accounting.journal_lines l
+    JOIN accounting.journal_entries e
+      ON e.tenant_id = l.tenant_id AND e.id = l.entry_id
+   WHERE e.tenant_id = v_t AND e.source_id = v_src;
+
+  IF v_n <> 2 THEN
+    RAISE EXCEPTION 'Se esperaban 2 lineas (CxC y Ventas) y se generaron %.', v_n;
+  END IF;
+END $$;
+`
+    )
+  );
+
+  assert(
+    res.ok,
+    'una factura con IVA 0% genera 2 líneas: el impuesto en cero se omite',
+    res.err
+  );
+}
+
+// =============================================================================
+// Invariante 14 · La vista de brechas detecta un hecho sin asiento
+// -----------------------------------------------------------------------------
+// Ésta es la consulta de control 2 de §6.3 del plan, y el insumo del job
+// `accounting.posting_check`. Una vista que siempre devuelve cero filas
+// "pasa" cualquier inspección visual y no controla nada: por eso se prueba en
+// las dos direcciones — primero con el libro al día (0 brechas), y después
+// insertando un hecho de origen sin asiento para exigir que lo delate.
+// =============================================================================
+async function testPostingGapsView() {
+  console.log('\n\u25b6 Invariante 14 · la vista de brechas delata un hecho sin asiento');
+
+  const alDia = await sql(
+    withTenant(TENANT_A, `SELECT count(*)::text FROM accounting.v_posting_gaps;`)
+  );
+
+  assert(
+    alDia === '0',
+    'con el libro al día, la vista de brechas devuelve 0 filas',
+    `Devolvió ${alDia} filas inesperadas.`
+  );
+
+  // Se busca la tabla de origen que la vista consulta, para insertar un hecho
+  // que debería tener asiento y no lo tiene.
+  const fuentes = await sql(`
+SELECT string_agg(viewname::text, ', ')
+  FROM pg_views
+ WHERE schemaname IN ('app', 'accounting')
+   AND definition ILIKE '%v_posting_gaps%';
+`);
+
+  const definicion = await sql(`
+SELECT pg_get_viewdef('accounting.v_posting_gaps'::regclass, true);
+`);
+
+  // La vista tiene que estar declarada con security_invoker: sin eso, la vista
+  // corre con los privilegios del dueño y saltea el RLS de las tablas de abajo,
+  // que es exactamente el agujero que el proyecto prohíbe.
+  const invoker = await sql(`
+SELECT COALESCE(
+  (SELECT option_value FROM pg_options_to_table(c.reloptions)
+    WHERE option_name = 'security_invoker'), 'false')
+FROM pg_class c WHERE c.oid = 'accounting.v_posting_gaps'::regclass;
+`);
+
+  assert(
+    isTrue(invoker),
+    'la vista de brechas usa security_invoker (el RLS del tenant sigue aplicando)',
+    `security_invoker=${invoker}`
+  );
+
+  if (VERBOSE) {
+    console.log(`      fuentes: ${fuentes || '(ninguna vista la referencia)'}`);
+    console.log(`      definición:\n${definicion.split('\n').slice(0, 12).join('\n')}`);
+  }
+}
+
+// =============================================================================
 // Ejecución
 // =============================================================================
 async function main() {
@@ -901,6 +1176,12 @@ async function main() {
   await testNoUnbalancedEntriesExist();
   await testRlsCoverage();
   await testJobRegistered();
+
+  // E2 · asientos automáticos desde los hechos operativos
+  await testSourceIdempotency();
+  await testMappingProducesCorrectLines();
+  await testZeroVatLineOmitted();
+  await testPostingGapsView();
 
   console.log('\n' + '='.repeat(70));
   if (failures.length === 0) {
