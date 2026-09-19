@@ -443,6 +443,96 @@ jobs:
             --verbose
 
   # ---------------------------------------------------------------------------
+  # 3 quater · Fundación fiscal (fase E5, primera parte).
+  #
+  #     NO es el gate de E5. §7.1 lo define como "posición de IVA reproducible
+  #     desde el libro", y esta suite no calcula IVA: verifica las dos cosas que
+  #     tienen que estar antes de que ese cálculo exista, y que el cálculo no
+  #     puede arreglar después.
+  #
+  #     La primera es un renombre. `0004` declaraba la columna `cae` con un CHECK
+  #     de formato argentino (`^[0-9]{14}$`), mientras el dominio TypeScript ya era
+  #     neutral (`authorizationId`). Ese CHECK convierte "agregar un país" en
+  #     "migrar la tabla de comprobantes": un comprobante chileno o mexicano no
+  #     puede representarse ni renombrando la columna. `0017` ejecuta la decisión
+  #     del ADR 0003 y esta suite comprueba que el renombre no rompió la
+  #     inmutabilidad fiscal, que es un trigger de plpgsql sobre la columna vieja.
+  #
+  #     La segunda es dónde viven las alícuotas. El ADR 0004 decide que son
+  #     parámetros con vigencia temporal y no constantes: una alícuota es una norma
+  #     con fecha, y si es una constante un comprobante de marzo se recalcula con
+  #     la de septiembre.
+  #
+  #     Esta suite encontró SIETE defectos que la validación estructural no podía
+  #     ver, y por eso existe. Los tres que más valen:
+  #
+  #       · `COMMENT ON COLUMN local_codes` corría antes del `ALTER TABLE ... ADD
+  #         COLUMN local_codes`. Falla la migración entera con "no existe la columna
+  #         local_codes", apuntando al COMMENT y no al ADD que falta.
+  #
+  #       · La constraint de exclusión de vigencia NO protegía las alícuotas de
+  #         plataforma. En un `EXCLUDE`, NULL se considera distinto de NULL —al
+  #         revés que en un `UNIQUE`—, así que dos alícuotas de IVA al 21% con
+  #         `tenant_id IS NULL` y rangos solapados entraban las dos, y `rates_on()`
+  #         devolvía DOS filas para la misma fecha. Es exactamente la
+  #         irreproducibilidad que F-6 prohíbe, en el caso que existe desde el día
+  #         uno. Se corrigió con un centinela en `COALESCE`, igual que `0012` para
+  #         el plan mínimo de cuentas.
+  #
+  #       · Dos FK simples a `fiscal.taxes(id)` sobre una tabla con `tenant_id`.
+  #         No fallan, funcionan, y permiten que una fila de la empresa A apunte a
+  #         un parámetro de la empresa B. Lo detectó `check-composite-fks`.
+  #
+  #     Corre contra un motor real porque ninguno de los tres se ve leyendo el
+  #     archivo: los tres aparecieron al aplicar la migración y ejecutar consultas.
+  # ---------------------------------------------------------------------------
+  fiscal:
+    name: Fundación fiscal (vocabulario y vigencia)
+    runs-on: ubuntu-latest
+    needs: migrations
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+      DATABASE_URL: postgres://app_login:AppL0gin!@localhost:5432/control_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar dependencias
+        run: npm ci --ignore-scripts
+
+      - name: Preparar esquema
+        run: |
+          set -euo pipefail
+          for f in $(ls db/migrations/*.sql | sort); do
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+
+      - name: Crear el rol de aplicación
+        run: |
+          set -euo pipefail
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE app_login LOGIN PASSWORD 'AppL0gin!' NOBYPASSRLS IN ROLE control_app;"
+
+      - name: Verificar la fundación fiscal
+        run: |
+          node tests/fiscal/_verify_0017.mjs --dsn "$ADMIN_DATABASE_URL"
+
+  # ---------------------------------------------------------------------------
   # 4 · TypeScript de la API.
   #
   #     Existía un job "probe" que salteaba todo si no encontraba `package.json`
