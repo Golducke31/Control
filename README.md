@@ -1268,9 +1268,10 @@ Control/
 ├── docs/
 │   ├── PLAN-PRODUCCION.md                      # Plan a producción multinacional
 │   ├── PLAN-ERP-MULTIEMPRESA.md                # Plan de evolución a ERP multiempresa
+│   ├── PLAN-FRONTEND-PRODUCCION.md             # ★ Frontend de producción: sistema de diseño y ventanas
 │   └── adr/                                    # ADR 0001–0006 (decisiones irreversibles)
 └── prototype/
-    └── index.html                              # Dashboard glassmorphism funcional
+    └── index.html                              # Prototipo de diseño (lo reemplaza el plan de frontend)
 ```
 
 ### Archivos clave
@@ -1462,7 +1463,7 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Generación de PDF.** `PdfExportService` produce el HTML completo con la identidad aplicada; falta el *renderer* con Chromium headless (Playwright).
 - **Definición de rutas HTTP.** Los servicios están implementados con sus dependencias inyectadas; resta el cableado de los handlers de Fastify.
 - **Tests de integración** contra AFIP homologación con un CUIT de prueba.
-- **Frontend de producción.** El prototipo valida el diseño; falta la implementación en Next.js con componentes reutilizables.
+- **Frontend de producción.** El prototipo valida el diseño; falta la implementación en Next.js con componentes reutilizables. **Planificado en [`docs/PLAN-FRONTEND-PRODUCCION.md`](docs/PLAN-FRONTEND-PRODUCCION.md)**: sistema de tokens sobre la paleta indicada, una ventana por función (≈110 rutas, 14 ventanas raíz) y el contrato con la API.
 - **Reconciliación de stock.** El job `stock.reconciliation` está implementado en `job-runner.ts` (cron `30 4 * * *`) y **reporta sin autocorregir**: la divergencia es un síntoma y no se puede saber cuál de las dos vistas es la equivocada. Queda pendiente decidir si la diferencia debe generar una alerta además de quedar en el ledger.
 - **Scheduler de infraestructura.** El ledger y el runner están implementados; falta el disparador externo (Kubernetes CronJob o el servicio gestionado que se elija) que invoque cada job según `JOB_SCHEDULE`. Mientras tanto, los jobs se pueden ejecutar a mano y quedan registrados igual.
 - **Alertas de jobs atrasados.** `ops.v_job_health` expone `is_overdue`, pero falta conectar esa vista al sistema de alertas.

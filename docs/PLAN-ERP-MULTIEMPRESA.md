@@ -155,7 +155,7 @@ Sería un error tratar el proyecto como si hubiera que empezar de nuevo. Estos a
 | Jobs | **9 activos** | Ledger con `is_overdue`, `is_running` |
 | Typecheck | **Limpio en todos los workspaces** | `tsc --noEmit` en la raíz cubre `apps/*` y `packages/*`, y el job del CI lo ejecuta de verdad |
 | Suite de tests | **6 suites contra motor real + 21 tests unitarios** | 948 verificaciones; falta cobertura unitaria por módulo |
-| Frontend de producción | No existe | El prototipo (`prototype/index.html`) valida diseño; no hay implementación Next.js |
+| Frontend de producción | No existe | El prototipo (`prototype/index.html`) valida diseño; no hay implementación Next.js. Plan detallado en [`PLAN-FRONTEND-PRODUCCION.md`](PLAN-FRONTEND-PRODUCCION.md) |
 
 **Qué queda de las dos deudas que este plan señalaba.** La ausencia de tests unitarios y de integración sigue siendo el hueco grande: el plan de producción exige 85–95% de cobertura por módulo, y hoy hay 21 tests unitarios (scheduler y catálogo de jobs) más las 6 suites de invariantes. La segunda —que el job `typecheck` del CI no tenía valor— resultó **peor de lo diagnosticado** y ya está cerrada: el `tsconfig.json` de la raíz no incluía ningún archivo, así que el paso `tsc --noEmit` abortaba con TS18002 **antes de compilar** y el job fallaba siempre. Un pipeline que no puede ponerse verde no es un pipeline sin protección: es uno que esconde la protección que sí existe. Corregido en `477e89e`, junto con el `rls-lint`, que fallaba siempre por otra vía.
 
@@ -583,7 +583,7 @@ Estas decisiones son caras de revertir. Se documentan como ADR **antes** de impl
 |---|---|---|---|
 | `report.service.ts` no compilaba | El job de typecheck del CI no protegía | E0 | **Cerrada** |
 | Sin tests unitarios ni de integración | Todo módulo nuevo agrega riesgo sin red | E0 (permanente) | **Parcial**: 21 tests unitarios y 6 suites de invariantes contra motor real (948 verificaciones); falta cobertura por módulo |
-| Frontend de producción inexistente | El prototipo valida diseño, no implementa | E0 en adelante | **Abierta** |
+| Frontend de producción inexistente | El prototipo valida diseño, no implementa | E0 en adelante | **Abierta** — planificada en [`PLAN-FRONTEND-PRODUCCION.md`](PLAN-FRONTEND-PRODUCCION.md) |
 | `apps/api` sin `package.json` ni `tsconfig.json` | El typecheck del CI se salteaba en silencio | E0 | **Cerrada** (los manifiestos existen) |
 | `git push` bloqueado por el asistente de credenciales | Los commits quedaban locales | Independiente del plan | **Cerrada** (`scripts/push.sh`) |
 

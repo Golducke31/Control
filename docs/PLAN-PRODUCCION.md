@@ -158,6 +158,8 @@ Consecuencias medibles:
 - **Aislamiento de fallos.** Si el mapa en vivo se cae, el módulo de facturación sigue operativo.
 - **Carga progresiva.** Cada ventana define su propio *critical path*.
 
+> **Instanciación detallada.** Este principio se desarrolla en [`PLAN-FRONTEND-PRODUCCION.md`](PLAN-FRONTEND-PRODUCCION.md) §4, que extiende el mapa de ventanas de §4.2 de este documento —que cubre 13 ventanas— a **14 ventanas raíz y ≈110 rutas**, incorporando los módulos que la base ya soporta y el mapa no listaba: compras, tesorería, contabilidad, fiscal, devoluciones, listas de precios, auditoría y tareas. Ahí también están el sistema de diseño, la arquitectura técnica y las fases de implementación.
+
 ### 4.2 Mapa de ventanas
 
 ```mermaid
