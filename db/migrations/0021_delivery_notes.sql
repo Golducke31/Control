@@ -113,8 +113,21 @@ COMMENT ON COLUMN billing.delivery_note_items.qty_invoiced IS
   'la línea bloqueada. Un remito de 100 facturado en 60 + 40 queda en 100 y un tercer '
   'intento es rechazado (ADR 0006, decisión 2).';
 
-CREATE TRIGGER trg_delivery_note_items_touch BEFORE UPDATE ON billing.delivery_note_items
-  FOR EACH ROW EXECUTE FUNCTION app.touch_updated_at();
+-- NOTA · por qué esta tabla NO lleva trigger `touch_updated_at()`
+--
+-- Sólo las tablas de cabecera/documento llevan `updated_at` y su trigger:
+-- `delivery_notes`, `sales_orders`, `invoices`, `afip_credentials`, `afip_outbox`.
+-- Las de líneas (`sales_order_items`, `invoice_items`, `invoice_taxes`) no la llevan,
+-- y `delivery_note_items` sigue ese mismo criterio.
+--
+-- El trigger se había copiado de la cabecera y dejaba la migración inaplicable en la
+-- práctica: `app.touch_updated_at()` hace `NEW.updated_at := now()`, la tabla no tiene
+-- esa columna, y el primer `UPDATE` de `qty_invoiced` desde
+-- `billing.invoice_delivery_note()` abortaba con
+-- «el registro new no tiene un campo updated_at». El gate V-2 no podía pasar nunca.
+--
+-- Es un defecto que sólo aparece al EJECUTAR: la migración aplica bien y los `INSERT`
+-- del escenario también. Recién el `UPDATE` del acumulador destapa el problema.
 
 -- -----------------------------------------------------------------------------
 -- 3 · Ligar la factura (y sus líneas) al remito, para la trazabilidad

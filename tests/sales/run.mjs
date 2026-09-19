@@ -106,9 +106,9 @@ const { dsn: DSN, adminDsn: ADMIN_DSN } = parseArgs();
 const APP_CONN = splitDsn(DSN);
 const ADMIN_CONN = splitDsn(ADMIN_DSN);
 
-function spawnPsql(args, { input }) {
+function spawnPsql(args, { env, input }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(PSQL, args, { env: process.env, windowsHide: true });
+    const child = spawn(PSQL, args, { env, windowsHide: true });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => (stdout += d.toString('utf8')));
@@ -170,6 +170,27 @@ function withTenant(tenantId, body, userId = USER_A) {
     body,
     'COMMIT;',
   ].join('\n');
+}
+
+/**
+ * Llamada al motor de facturación desde remito, con los tipos explícitos.
+ *
+ * POR QUÉ LOS CASTS. La firma es
+ * `invoice_delivery_note(uuid, uuid, billing.doc_type, smallint, bigint, jsonb, uuid)`.
+ * Escrita a mano, la llamada no resuelve: un literal `1` es `integer` y PostgreSQL no lo
+ * estrecha a `smallint` al elegir la función, y `'B'` suelto queda `unknown`. El error
+ * que produce es engañoso —«no existe la función ...(unknown, unknown, unknown, integer,
+ * integer, jsonb)»— porque apunta a la función y no a los literales. La aplicación pasa
+ * parámetros ya tipados; la suite, que escribe SQL como texto, tiene que declararlos.
+ */
+function invoiceFromRemito(tenantId, noteId, lineId, quantity, number) {
+  return `SELECT billing.invoice_delivery_note(
+    '${tenantId}'::uuid,
+    '${noteId}'::uuid,
+    'B'::billing.doc_type,
+    1::smallint,
+    ${number}::bigint,
+    '[{"delivery_note_item_id":"${lineId}","quantity":${quantity}}]'::jsonb);`;
 }
 
 function output(raw) {
@@ -323,47 +344,35 @@ async function gateV2() {
 
   // 1) Facturar 60 de 100.
   const inv1 = output(
-    await sql(
-      withTenant(
-        TENANT_A,
-        `SELECT billing.invoice_delivery_note('${TENANT_A}', '${DN_A}', 'B', 1, 1,
-          '[{"delivery_note_item_id":"${lineId}","quantity":60}]'::jsonb);`
-      )
-    )
+    await sql(withTenant(TENANT_A, invoiceFromRemito(TENANT_A, DN_A, lineId, 60, 1)))
   );
-  assert('facturar 60 del remito de 100 es aceptado', !!inv1 && inv1.length > 0, `inv1=${inv1}`);
+  assert(!!inv1 && inv1.length > 0, 'facturar 60 del remito de 100 es aceptado', `inv1=${inv1}`);
 
   const q1 = num(
     output(await sql(withTenant(TENANT_A, `SELECT qty_invoiced FROM billing.delivery_note_items WHERE id = '${lineId}';`)))
   );
-  assert('el acumulado de la línea queda en 60 tras la primera factura', q1 === 60, `qty_invoiced=${q1}`);
+  assert(q1 === 60, 'el acumulado de la línea queda en 60 tras la primera factura', `qty_invoiced=${q1}`);
 
   const st1 = output(
     await sql(withTenant(TENANT_A, `SELECT status FROM billing.delivery_notes WHERE id = '${DN_A}';`))
   );
-  assert('el remito queda en partially_invoiced', st1 === 'partially_invoiced', st1);
+  assert(st1 === 'partially_invoiced', 'el remito queda en partially_invoiced', st1);
 
   // 2) Facturar los 40 restantes.
   const inv2 = output(
-    await sql(
-      withTenant(
-        TENANT_A,
-        `SELECT billing.invoice_delivery_note('${TENANT_A}', '${DN_A}', 'B', 1, 2,
-          '[{"delivery_note_item_id":"${lineId}","quantity":40}]'::jsonb);`
-      )
-    )
+    await sql(withTenant(TENANT_A, invoiceFromRemito(TENANT_A, DN_A, lineId, 40, 2)))
   );
-  assert('facturar los 40 restantes es aceptado', !!inv2 && inv2.length > 0, `inv2=${inv2}`);
+  assert(!!inv2 && inv2.length > 0, 'facturar los 40 restantes es aceptado', `inv2=${inv2}`);
 
   const q2 = num(
     output(await sql(withTenant(TENANT_A, `SELECT qty_invoiced FROM billing.delivery_note_items WHERE id = '${lineId}';`)))
   );
-  assert('el acumulado de la línea queda en 100 (60+40)', q2 === 100, `qty_invoiced=${q2}`);
+  assert(q2 === 100, 'el acumulado de la línea queda en 100 (60+40)', `qty_invoiced=${q2}`);
 
   const st2 = output(
     await sql(withTenant(TENANT_A, `SELECT status FROM billing.delivery_notes WHERE id = '${DN_A}';`))
   );
-  assert('el remito queda en invoiced', st2 === 'invoiced', st2);
+  assert(st2 === 'invoiced', 'el remito queda en invoiced', st2);
 
   // 3) La suma de lo facturado de la línea es 100, no 160 ni 200.
   const tot = num(
@@ -376,48 +385,37 @@ async function gateV2() {
       )
     )
   );
-  assert('la suma de lo facturado de la línea es 100 (sin duplicar)', tot === 100, `total=${tot}`);
+  assert(tot === 100, 'la suma de lo facturado de la línea es 100 (sin duplicar)', `total=${tot}`);
 
   // 4) Sobre-facturar 1 más: rechazado.
-  const over = await trySql(
-    withTenant(
-      TENANT_A,
-      `SELECT billing.invoice_delivery_note('${TENANT_A}', '${DN_A}', 'B', 1, 3,
-        '[{"delivery_note_item_id":"${lineId}","quantity":1}]'::jsonb);`
-    )
-  );
-  assert('facturar 1 más de lo despachado es rechazado', !over.ok, over.err);
+  const over = await trySql(withTenant(TENANT_A, invoiceFromRemito(TENANT_A, DN_A, lineId, 1, 3)));
+  assert(!over.ok, 'facturar 1 más de lo despachado es rechazado', over.err);
 
   // 5) Volver a facturar 60 (ya en 100): rechazado.
-  const dup = await trySql(
-    withTenant(
-      TENANT_A,
-      `SELECT billing.invoice_delivery_note('${TENANT_A}', '${DN_A}', 'B', 1, 4,
-        '[{"delivery_note_item_id":"${lineId}","quantity":60}]'::jsonb);`
-    )
-  );
-  assert('volver a facturar 60 ya facturado es rechazado', !dup.ok, dup.err);
+  const dup = await trySql(withTenant(TENANT_A, invoiceFromRemito(TENANT_A, DN_A, lineId, 60, 4)));
+  assert(!dup.ok, 'volver a facturar 60 ya facturado es rechazado', dup.err);
 
   // 6) El CHECK de motor protege aunque se saltee la función (V-7).
   const direct = await trySql(
     withTenant(TENANT_A, `UPDATE billing.delivery_note_items SET qty_invoiced = 200 WHERE id = '${lineId}';`)
   );
-  assert('el CHECK del motor impide qty_invoiced > quantity', !direct.ok, direct.err);
+  assert(!direct.ok, 'el CHECK del motor impide qty_invoiced > quantity', direct.err);
 
-  // 7) Aislamiento: la empresa B no puede facturar el remito de A (RLS + filtro de función).
+  // 7) Aislamiento: la empresa B no puede facturar el remito de A.
+  //    La sesión se abre como B con SU usuario (USER_B), no con el default USER_A: el
+  //    contexto y el actor tienen que ser coherentes para que el escenario represente
+  //    una sesión real de B. El rechazo lo produce el filtro explícito de la función
+  //    (`tenant_id = p_tenant_id`), no RLS —`invoice_delivery_note` es SECURITY DEFINER
+  //    y corre como el owner—, así que la prueba ejercita ese filtro y no la membresía.
   const cross = await trySql(
-    withTenant(
-      TENANT_B,
-      `SELECT billing.invoice_delivery_note('${TENANT_B}', '${DN_A}', 'B', 1, 5,
-        '[{"delivery_note_item_id":"${lineId}","quantity":1}]'::jsonb);`
-    )
+    withTenant(TENANT_B, invoiceFromRemito(TENANT_B, DN_A, lineId, 1, 5), USER_B)
   );
-  assert('una empresa no puede facturar el remito de otra (RLS)', !cross.ok, cross.err);
+  assert(!cross.ok, 'una empresa no puede facturar el remito de otra (RLS)', cross.err);
 }
 
 // =============================================================================
 async function main() {
-  preflight();
+  await preflight();
   await setup();
   await gateV2();
 
@@ -457,6 +455,12 @@ COMMIT;
 }
 
 main().catch((e) => {
+  // El `stderr` de psql trae el error real del motor (y `input`, la sentencia que falló).
+  // Imprimir sólo `e.message` deja «psql salió con código 3», que no dice nada: el
+  // diagnóstico se vuelve a ciegas y obliga a reproducir la sentencia a mano.
   console.error('Error inesperado:', e.message);
+  if (e.stderr) console.error('--- psql stderr ---\n' + String(e.stderr).trim());
+  if (e.stdout) console.error('--- psql stdout ---\n' + String(e.stdout).trim());
+  if (e.input) console.error('--- sentencia ---\n' + String(e.input).trim());
   process.exit(1);
 });
