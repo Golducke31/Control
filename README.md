@@ -10,7 +10,7 @@ Diseñado para operar en Argentina, con foco en distribuidoras, comercios y oper
 
 1. [Resumen ejecutivo](#1-resumen-ejecutivo)
 2. [Arquitectura del sistema](#2-arquitectura-del-sistema)
-3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls) — incluye las trampas de RLS en tablas particionadas, el remito (§3.10), la devolución (§3.11) y las listas de precios con vigencia (§3.12)
+3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls) — incluye las trampas de RLS en tablas particionadas, el remito (§3.10), la devolución (§3.11), las listas de precios con vigencia (§3.12) y la cotización (§3.13)
 4. [Autenticación y autorización](#4-autenticación-y-autorización)
 5. [Integración AFIP: flujo completo](#5-integración-afip-flujo-completo)
 6. [Stock, depósitos y trazabilidad](#6-stock-depósitos-y-trazabilidad)
@@ -182,6 +182,10 @@ erDiagram
     warehouses ||--o{ stock_levels : "almacena"
     warehouses ||--o{ stock_transfers : "origen y destino"
 
+    customers ||--o{ quotes : "cotiza"
+    quotes ||--o{ quote_items : "detalla"
+    price_lists ||--o{ quotes : "precia"
+
     customers ||--o{ sales_orders : "compra"
     sales_orders ||--o{ sales_order_items : "detalla"
     sales_orders ||--o{ invoices : "factura"
@@ -328,6 +332,26 @@ erDiagram
         numeric unit_price "snapshot de lo facturado"
         numeric tax_rate
     }
+    quotes {
+        uuid id PK
+        uuid tenant_id FK
+        text number UK
+        uuid customer_id FK
+        uuid price_list_id FK
+        text status "draft|issued|accepted|rejected|cancelled"
+        date valid_from
+        date valid_until "vencida exige reconfirmar"
+        numeric total
+    }
+    quote_items {
+        uuid id PK
+        uuid tenant_id FK
+        uuid quote_id FK
+        uuid variant_id FK
+        numeric quantity
+        numeric unit_price "resuelto por price_for()"
+        numeric tax_rate
+    }
     shipments {
         uuid id PK
         uuid tenant_id FK
@@ -378,6 +402,7 @@ erDiagram
 | `billing` | `delivery_note_items` | Líneas del remito con `qty_invoiced` (acumulado facturado, gate V-2). | Sí |
 | `billing` | `customer_returns` | **Devolución**: revierte stock y genera la nota de crédito (gate V-3). | Sí |
 | `billing` | `customer_return_items` | Líneas de la devolución, validadas contra lo facturado por variante. | Sí |
+| `billing` | `quotes` / `quote_items` | **Cotización**: oferta con validez que no compromete stock ni genera asiento (gate V-1). | Sí |
 | `billing` | `credit_applications` | Imputación de notas de crédito al saldo de facturas. | Sí |
 | `billing` | `afip_request_log` | Bitácora forense WSAA/WSFE. | Sí + append-only |
 | `billing` | `afip_outbox` | Cola de reintentos de emisión. | Sí |
@@ -635,6 +660,25 @@ La nota de crédito nace como **borrador** ligada por `related_invoice_id`; la a
 Un detalle que la `EXCLUDE` obliga a hacer bien: **un cambio de precio cierra la ventana anterior**. Con `valid_to NULL` la ventana se extiende para siempre y cualquier ventana futura se solapa, así que la `EXCLUDE` la rechaza. Es correcto —así se modela un cambio de precio— y es la clase de error que el motor atrapa en vez de dejar pasar en silencio.
 
 **Verificación.** `tests/sales/run.mjs` mide el gate: los bordes de cada tramo (9 y 10 caen en escalas distintas), la escala sin tope superior, la vigencia (cargar un precio futuro **no** cambia el precio de hoy), la caída al multiplicador, el caso sin precio configurado (0 filas), el rechazo del solapamiento y de la segunda lista por defecto, y el aislamiento entre empresas.
+
+### 3.13 La cotización: una oferta que vence y no compromete nada (gate V-1)
+
+El ADR [`0006`](docs/adr/0006-documentos-de-venta.md) nombra tres documentos que en la operación real son distintos: cotización, remito y factura. Los dos últimos llegaron en §3.10 y §3.11; la cotización faltaba, así que una oferta con vencimiento no tenía dónde vivir — o se mandaba una orden de venta como si fuera una cotización, comprometiendo stock y dejando en el circuito un pedido firme, o se cotizaba fuera del sistema.
+
+`0025` la agrega con el ciclo `draft → issued → accepted` (+ `rejected`, `cancelled`):
+
+| Paso | Qué hace | Garantía |
+|---|---|---|
+| `add_quote_item()` | Carga una línea | Resuelve el precio con `app.price_for()` a la fecha indicada; **falla** si la lista no tiene precio (no cotiza un 0) |
+| `issue_quote()` | `draft → issued` | Exige líneas y **recalcula los totales** desde ellas: la cabecera no elige los importes |
+| `accept_quote()` | `issued → accepted` | **Rechaza una vencida**: exige reconfirmarla primero |
+| `reconfirm_quote()` | Extiende la validez | No admite reconfirmar hacia el pasado |
+
+**La definición son dos negaciones, y las dos se verifican.** No compromete stock: no emite ningún movimiento, *ni siquiera una `reservation`* — reservar por una oferta que puede no aceptarse nunca sería comprometer mercadería de arriba—. Y no genera asiento: no es un hecho económico, así que no aparece en `accounting.v_posting_gaps` ni puede producir una línea de diario.
+
+**El vencimiento se deriva, no se almacena.** Un `status = 'expired'` guardado en la fila necesitaría un job que lo ponga al día, y entre el vencimiento real y la corrida del job la fila mentiría; peor, si el job no corre, miente para siempre. `billing.v_quotes` expone `effective_status` calculado contra la fecha de hoy **para listar**; el cumplimiento, en cambio, usa la fecha explícita que recibe `accept_quote()`, igual que `rates_on()` y `price_for()`. Una decisión no debería depender de `now()` si se quiere poder verificarla.
+
+**Verificación.** `tests/sales/run.mjs` mide el gate: la línea toma el precio de la escala de la lista, el fallo cuando no hay precio, los totales recalculados desde las líneas, la idempotencia, el rechazo de aceptar una vencida (con un error que dice *qué hacer*), la reconfirmación que la vuelve aceptable, el rechazo de reconfirmar hacia el pasado o una ya aceptada, y las dos negaciones —saldo de stock intacto, cero movimientos y cero asientos—.
 
 ---
 
@@ -1176,7 +1220,8 @@ Control/
 │   │   ├── 0021_delivery_notes.sql            # ★ Remito: documento propio + facturación parcial
 │   │   ├── 0022_customer_returns.sql          # ★ Devolución: revierte stock + nota de crédito
 │   │   ├── 0023_price_lists_validity_and_tiers.sql # ★ Precio por lista con vigencia y escalas
-│   │   └── 0024_variants_barcode_nullable_unique.sql # Fix: dos variantes sin código de barras
+│   │   ├── 0024_variants_barcode_nullable_unique.sql # Fix: dos variantes sin código de barras
+│   │   └── 0025_quotes_with_validity.sql      # ★ Cotización: oferta con validez y vencimiento
 │   └── seed/
 │       └── 0001_system_catalog.sql            # Permisos, roles de sistema, plantillas
 ├── apps/
@@ -1419,7 +1464,6 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Tests de integración** contra AFIP homologación con un CUIT de prueba.
 - **Frontend de producción.** El prototipo valida el diseño; falta la implementación en Next.js con componentes reutilizables.
 - **Reconciliación de stock.** El job `stock.reconciliation` está implementado en `job-runner.ts` (cron `30 4 * * *`) y **reporta sin autocorregir**: la divergencia es un síntoma y no se puede saber cuál de las dos vistas es la equivocada. Queda pendiente decidir si la diferencia debe generar una alerta además de quedar en el ledger.
-- **Cotización con validez.** Es lo único que queda pendiente de E6: el ADR `0006` la decidió como documento con vencimiento y reconfirmación, pero no tiene migración todavía. Hasta entonces, remito, devolución y factura usan el `unit_price` snapshot de la orden o de lo facturado.
 - **Scheduler de infraestructura.** El ledger y el runner están implementados; falta el disparador externo (Kubernetes CronJob o el servicio gestionado que se elija) que invoque cada job según `JOB_SCHEDULE`. Mientras tanto, los jobs se pueden ejecutar a mano y quedan registrados igual.
 - **Alertas de jobs atrasados.** `ops.v_job_health` expone `is_overdue`, pero falta conectar esa vista al sistema de alertas.
 
@@ -1434,6 +1478,7 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **La devolución de cliente no existía como documento.** La migración `0022` (ADR `0006`) agrega `billing.customer_returns` + `customer_return_items` y `billing.apply_customer_return()`, que revierte el stock con un `return_in` trazable y emite la nota de crédito sin permitir devolver de más ni dos veces. El gate V-3 se mide en `tests/sales/run.mjs`. Ver [§3.11](#311-la-devolución-y-la-nota-de-crédito-gate-v-3).
 - **El precio no tenía vigencia ni escalas, y cambiarlo reescribía el pasado.** La migración `0023` (ADR `0006`) agrega vigencia y escalas por cantidad a `app.price_list_items` y `app.price_for()`, con una `EXCLUDE` que impide dos escalas solapadas y un `UNIQUE` parcial que admite una sola lista por defecto. El gate V-4 se mide en `tests/sales/run.mjs`. Ver [§3.12](#312-listas-de-precios-con-vigencia-y-escalas-por-cantidad-gate-v-4).
 - **Una empresa no podía tener dos variantes sin código de barras.** `0003` declaró `UNIQUE NULLS NOT DISTINCT (tenant_id, barcode)` sobre una columna **opcional**: con `NULLS NOT DISTINCT`, NULL cuenta como un valor y la segunda variante sin EAN era rechazada — mientras el índice parcial `idx_variants_barcode ... WHERE barcode IS NOT NULL` de la línea siguiente expresaba la intención contraria. Corregido en `0024` con `UNIQUE (tenant_id, barcode)` a secas. Es una relajación: admite filas antes rechazadas y no invalida ninguna existente.
+- **La cotización con validez no existía, y era el último documento de E6.** La migración `0025` (ADR `0006`) agrega `billing.quotes` + `quote_items` con ciclo `draft → issued → accepted`, `add_quote_item()` que resuelve el precio desde la lista, y `accept_quote()` que **rechaza una oferta vencida** exigiendo reconfirmarla. El vencimiento se deriva (`v_quotes.effective_status`) en vez de almacenarse, y las dos negaciones que la definen se verifican: no emite movimientos de stock —ni una reserva— ni genera asiento. El gate V-1 se mide en `tests/sales/run.mjs`. Con esto **E6 queda completo**: V-1, V-2, V-3 y V-4 medidos. Ver [§3.13](#313-la-cotización-una-oferta-que-vence-y-no-compromete-nada-gate-v-1).
 
 ---
 

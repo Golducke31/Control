@@ -609,7 +609,7 @@ jobs:
           psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
             "CREATE ROLE app_login LOGIN PASSWORD 'AppL0gin!' NOBYPASSRLS IN ROLE control_app;"
 
-      - name: Ejecutar las puertas de E6 (remito en partes · devolución que revierte stock y acredita · precio por lista con vigencia y escala)
+      - name: Ejecutar las puertas de E6 (remito en partes · devolución · precio por lista con vigencia · cotización que vence)
         run: |
           node tests/sales/run.mjs \
             --dsn "$DATABASE_URL" \

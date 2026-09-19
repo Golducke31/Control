@@ -97,6 +97,18 @@ const PRICE_T3   = 70;    // escala 50..∞
 const PRICE_T4   = 120;   // escala 1..9 de la ventana futura
 const PRICE_PROMO = 80;   // 100 × 0.80
 
+// --- Escenario de la cotización (V-1) -----------------------------------------
+const Q_OK      = 'd6000000-0000-4000-f600-000000000050'; // draft → issued → accepted
+const Q_EXPIRED = 'd6000000-0000-4000-f600-000000000051'; // emitida y vencida
+const Q_EMPTY   = 'd6000000-0000-4000-f600-000000000052'; // sin líneas
+const Q_CROSS   = 'd6000000-0000-4000-f600-000000000053'; // emitida, para el aislamiento
+const QUOTE_QTY = 10;
+// El precio de la línea sale de la escala 10..49 de la lista mayorista (V-4).
+const QUOTE_UNIT_PRICE = PRICE_T2;
+const QUOTE_NET        = QUOTE_QTY * QUOTE_UNIT_PRICE;      // 800
+const QUOTE_TAX        = 168;                                // 800 × 0,21
+const QUOTE_TOTAL      = QUOTE_NET + QUOTE_TAX;              // 968
+
 let VERBOSE = false;
 let passCount = 0;
 const failures = [];
@@ -261,6 +273,28 @@ function priceForSql(tenantId, listId, variantId, quantity, dateExpr) {
     '${variantId}'::uuid,
     ${quantity}::numeric,
     ${dateExpr});`;
+}
+
+/**
+ * Funciones de la cotización, con los tipos explícitos.
+ *
+ * Misma razón que las demás: `numeric` y `date` no se resuelven solos desde literales
+ * sin tipar, y el error que produce PostgreSQL apunta a la función y no al literal.
+ */
+function addQuoteItemSql(tenantId, quoteId, variantId, quantity, dateExpr) {
+  return `SELECT billing.add_quote_item(
+    '${tenantId}'::uuid, '${quoteId}'::uuid, '${variantId}'::uuid,
+    ${quantity}::numeric, ${dateExpr});`;
+}
+
+function acceptQuoteSql(tenantId, quoteId, dateExpr) {
+  return `SELECT billing.accept_quote(
+    '${tenantId}'::uuid, '${quoteId}'::uuid, ${dateExpr});`;
+}
+
+function reconfirmQuoteSql(tenantId, quoteId, newUntilExpr, dateExpr) {
+  return `SELECT billing.reconfirm_quote(
+    '${tenantId}'::uuid, '${quoteId}'::uuid, ${newUntilExpr}, ${dateExpr});`;
 }
 
 function output(raw) {
@@ -969,12 +1003,174 @@ VALUES
 }
 
 // =============================================================================
+// Gate V-1 · Cotización con validez: vencida, requiere reconfirmación
+// =============================================================================
+async function gateV1() {
+  console.log('\n\u25b6 Gate V-1 · Cotización con validez (vencida exige reconfirmación)');
+
+  const prep = await trySql(
+    withTenant(
+      TENANT_A,
+      `
+INSERT INTO billing.quotes
+  (id, tenant_id, number, customer_id, price_list_id, status, valid_from, valid_until)
+VALUES
+  ('${Q_OK}',      '${TENANT_A}', 'COT-1', '${CUST_A}', '${LIST_MAY}', 'draft',  CURRENT_DATE,      CURRENT_DATE + 30),
+  ('${Q_EXPIRED}', '${TENANT_A}', 'COT-2', '${CUST_A}', '${LIST_MAY}', 'issued', CURRENT_DATE - 30, CURRENT_DATE - 1),
+  ('${Q_EMPTY}',   '${TENANT_A}', 'COT-3', '${CUST_A}', '${LIST_MAY}', 'draft',  CURRENT_DATE,      CURRENT_DATE + 30),
+  ('${Q_CROSS}',   '${TENANT_A}', 'COT-4', '${CUST_A}', '${LIST_MAY}', 'issued', CURRENT_DATE,      CURRENT_DATE + 30);
+`
+    )
+  );
+  if (!prep.ok) {
+    assert(false, 'V-1 · se pudo preparar el escenario de la cotización', prep.err);
+    return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 1) La línea se cotiza con el precio de la LISTA (integración con V-4)
+  // ---------------------------------------------------------------------------
+  const item = output(await sql(withTenant(TENANT_A, addQuoteItemSql(TENANT_A, Q_OK, VAR_A, QUOTE_QTY, 'CURRENT_DATE'))));
+  assert(/^[0-9a-f-]{36}$/.test(item), 'agregar una línea a la cotización devuelve su id', item);
+
+  let got = output(await sql(withTenant(TENANT_A, `SELECT unit_price || '|' || tax_rate || '|' || quantity
+    FROM billing.quote_items WHERE tenant_id = '${TENANT_A}' AND quote_id = '${Q_OK}';`)));
+  assert(
+    got === `${QUOTE_UNIT_PRICE}.00|0.2100|${QUOTE_QTY}.000`,
+    `la línea toma el precio de la escala de la lista (${QUOTE_UNIT_PRICE}) y el IVA del producto`,
+    `línea=${got}`
+  );
+
+  const sinPrecio = await trySql(withTenant(TENANT_A, addQuoteItemSql(TENANT_A, Q_OK, VAR_ZERO, 1, 'CURRENT_DATE')));
+  assert(
+    !sinPrecio.ok && /no se cotiza un 0/.test(String(sinPrecio.err)),
+    'cotizar una variante sin precio configurado falla en vez de cotizar 0',
+    sinPrecio.err
+  );
+
+  const qtyCero = await trySql(withTenant(TENANT_A, addQuoteItemSql(TENANT_A, Q_OK, VAR_A, 0, 'CURRENT_DATE')));
+  assert(!qtyCero.ok, 'una cantidad no positiva no se cotiza', qtyCero.err);
+
+  // ---------------------------------------------------------------------------
+  // 2) Emitir recalcula los totales desde las líneas
+  // ---------------------------------------------------------------------------
+  got = output(await sql(withTenant(TENANT_A, `SELECT billing.issue_quote('${TENANT_A}'::uuid, '${Q_OK}'::uuid);`)));
+  assert(got === 'issued', 'emitir la cotización la deja en issued', got);
+
+  const totals = output(await sql(withTenant(TENANT_A, `SELECT subtotal || '|' || tax_total || '|' || total
+    FROM billing.quotes WHERE tenant_id = '${TENANT_A}' AND id = '${Q_OK}';`)));
+  assert(
+    totals === `${QUOTE_NET}.00|${QUOTE_TAX}.00|${QUOTE_TOTAL}.00`,
+    `los totales se calculan desde las líneas (${QUOTE_NET} + ${QUOTE_TAX} = ${QUOTE_TOTAL})`,
+    `totales=${totals}`
+  );
+
+  got = output(await sql(withTenant(TENANT_A, `SELECT billing.issue_quote('${TENANT_A}'::uuid, '${Q_OK}'::uuid);`)));
+  assert(got === 'issued', 'emitir dos veces es idempotente', got);
+
+  const vacia = await trySql(withTenant(TENANT_A, `SELECT billing.issue_quote('${TENANT_A}'::uuid, '${Q_EMPTY}'::uuid);`));
+  assert(!vacia.ok, 'no se emite una cotización sin líneas', vacia.err);
+
+  const yaEmitida = await trySql(withTenant(TENANT_A, addQuoteItemSql(TENANT_A, Q_OK, VAR_A, 1, 'CURRENT_DATE')));
+  assert(!yaEmitida.ok, 'no se le agregan líneas a una cotización ya emitida', yaEmitida.err);
+
+  // ---------------------------------------------------------------------------
+  // 3) No compromete stock ni genera asiento (la definición de una cotización)
+  // ---------------------------------------------------------------------------
+  const stockAntes = num(
+    output(await sql(withTenant(TENANT_A, `SELECT on_hand FROM app.stock_levels
+      WHERE tenant_id = '${TENANT_A}' AND variant_id = '${VAR_A}' AND warehouse_id = '${WH_A}';`)))
+  );
+
+  got = output(await sql(withTenant(TENANT_A, acceptQuoteSql(TENANT_A, Q_OK, 'CURRENT_DATE'))));
+  assert(got === 'accepted', 'aceptar una cotización vigente la deja en accepted', got);
+
+  got = output(await sql(withTenant(TENANT_A, acceptQuoteSql(TENANT_A, Q_OK, 'CURRENT_DATE'))));
+  assert(got === 'accepted', 'aceptar dos veces es idempotente', got);
+
+  const stockDespues = num(
+    output(await sql(withTenant(TENANT_A, `SELECT on_hand FROM app.stock_levels
+      WHERE tenant_id = '${TENANT_A}' AND variant_id = '${VAR_A}' AND warehouse_id = '${WH_A}';`)))
+  );
+  assert(
+    stockDespues === stockAntes,
+    'la cotización no compromete stock: el saldo no cambia',
+    `antes=${stockAntes} después=${stockDespues}`
+  );
+
+  const movs = num(
+    output(await sql(withTenant(TENANT_A, `SELECT count(*) FROM app.stock_movements
+      WHERE tenant_id = '${TENANT_A}' AND source_id = '${Q_OK}';`)))
+  );
+  assert(movs === 0, 'la cotización no emite ningún movimiento de stock, ni siquiera una reserva', `movimientos=${movs}`);
+
+  const asientos = num(
+    output(await sql(withTenant(TENANT_A, `SELECT count(*) FROM accounting.journal_entries
+      WHERE tenant_id = '${TENANT_A}' AND source_id = '${Q_OK}';`)))
+  );
+  assert(asientos === 0, 'la cotización no genera asiento: no es un hecho económico', `asientos=${asientos}`);
+
+  const gaps = num(
+    output(await sql(withTenant(TENANT_A, `SELECT count(*) FROM accounting.v_posting_gaps
+      WHERE tenant_id = '${TENANT_A}' AND source_id = '${Q_OK}';`)))
+  );
+  assert(gaps === 0, 'la cotización tampoco aparece como hecho pendiente de asiento', `gaps=${gaps}`);
+
+  // ---------------------------------------------------------------------------
+  // 4) El vencimiento: aceptarla exige reconfirmar
+  // ---------------------------------------------------------------------------
+  got = output(await sql(withTenant(TENANT_A, `SELECT effective_status || '|' || is_expired::text
+    FROM billing.v_quotes WHERE tenant_id = '${TENANT_A}' AND id = '${Q_EXPIRED}';`)));
+  assert(got === 'expired|true', 'una cotización emitida cuya validez pasó figura como expired', got);
+
+  const vencida = await trySql(withTenant(TENANT_A, acceptQuoteSql(TENANT_A, Q_EXPIRED, 'CURRENT_DATE')));
+  assert(
+    !vencida.ok && /venció/.test(String(vencida.err)) && /reconfírmela/.test(String(vencida.err)),
+    'aceptar una cotización vencida es rechazado, y el error dice que hay que reconfirmarla',
+    vencida.err
+  );
+
+  const nuevaValidez = output(
+    await sql(withTenant(TENANT_A, reconfirmQuoteSql(TENANT_A, Q_EXPIRED, 'CURRENT_DATE + 15', 'CURRENT_DATE')))
+  );
+  assert(/^\d{4}-\d{2}-\d{2}$/.test(nuevaValidez), 'reconfirmar devuelve la nueva fecha de validez', nuevaValidez);
+
+  got = output(await sql(withTenant(TENANT_A, `SELECT effective_status FROM billing.v_quotes
+    WHERE tenant_id = '${TENANT_A}' AND id = '${Q_EXPIRED}';`)));
+  assert(got === 'issued', 'tras reconfirmar, la cotización vuelve a estar vigente', got);
+
+  got = output(await sql(withTenant(TENANT_A, acceptQuoteSql(TENANT_A, Q_EXPIRED, 'CURRENT_DATE'))));
+  assert(got === 'accepted', 'tras reconfirmar, la cotización se puede aceptar', got);
+
+  const retro = await trySql(
+    withTenant(TENANT_A, reconfirmQuoteSql(TENANT_A, Q_CROSS, 'CURRENT_DATE - 5', 'CURRENT_DATE'))
+  );
+  assert(
+    !retro.ok && /hacia adelante/.test(String(retro.err)),
+    'no se reconfirma hacia el pasado: la oferta nacería vencida',
+    retro.err
+  );
+
+  const yaAceptada = await trySql(
+    withTenant(TENANT_A, reconfirmQuoteSql(TENANT_A, Q_OK, 'CURRENT_DATE + 60', 'CURRENT_DATE'))
+  );
+  assert(!yaAceptada.ok, 'no se reconfirma una cotización ya aceptada', yaAceptada.err);
+
+  // ---------------------------------------------------------------------------
+  // 5) Aislamiento
+  // ---------------------------------------------------------------------------
+  const cross = await trySql(withTenant(TENANT_B, acceptQuoteSql(TENANT_B, Q_CROSS, 'CURRENT_DATE'), USER_B));
+  assert(!cross.ok, 'una empresa no puede aceptar la cotización de otra (RLS + filtro de tenant)', cross.err);
+}
+
+// =============================================================================
 async function main() {
   await preflight();
   await setup();
   await gateV2();
   await gateV3();
   await gateV4();
+  await gateV1();
 
   console.log(`\n${'='.repeat(70)}`);
   if (failures.length === 0) {
@@ -993,6 +1189,8 @@ SELECT app.set_tenant_context(NULL, NULL, true);
 DELETE FROM billing.credit_applications   WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM billing.customer_return_items WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM billing.customer_returns      WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM billing.quote_items           WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM billing.quotes                WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM billing.invoice_items         WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM billing.invoices              WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM billing.delivery_note_items   WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
