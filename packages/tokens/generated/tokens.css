@@ -1,0 +1,235 @@
+/*
+ * ARCHIVO GENERADO — no editar a mano.
+ *
+ * Fuente: packages/tokens/src/{escalas,roles,tipografia,geometria}.ts
+ * Regenerar: npm run generate --workspace @control/tokens
+ * Verificar: npm run check --workspace @control/tokens
+ */
+
+:root {
+  /* ---- Paleta indicada: las únicas constantes escritas a mano ---- */
+  --control-white: #FFFFFF;
+  --control-orange: #EF5F18;
+  --control-scarlet: #261A66;
+
+  /* ---- Tonos de lienzo, muestreados de la imagen de referencia ---- */
+  --control-lienzo-canvas: #130D36;
+  --control-lienzo-profundo: #1E154C;
+  --control-lienzo-medio: #3D3165;
+  --control-lienzo-claro: #E7E4E8;
+
+  /* ---- Escala scarlet ---- */
+  --control-scarlet-50: #F7F7FA;
+  --control-scarlet-100: #ECEBF4;
+  --control-scarlet-200: #DAD7EA;
+  --control-scarlet-300: #C4BFDF;
+  --control-scarlet-400: #AAA2D4;
+  --control-scarlet-500: #8C81C9;
+  --control-scarlet-600: #6B5BC0;
+  --control-scarlet-700: #4E3CAF;
+  --control-scarlet-800: #392A8C;
+  --control-scarlet-900: #261A66;
+  --control-scarlet-950: #1A1243;
+  --control-scarlet-990: #100C27;
+
+  /* ---- Escala orange ---- */
+  --control-orange-50: #FBF8F6;
+  --control-orange-100: #F5ECE7;
+  --control-orange-200: #EED9CE;
+  --control-orange-300: #E8C1AD;
+  --control-orange-400: #E5A485;
+  --control-orange-500: #E78453;
+  --control-orange-600: #EF5F18;
+  --control-orange-700: #C24A0F;
+  --control-orange-800: #993B0D;
+  --control-orange-900: #732D0B;
+  --control-orange-950: #502008;
+  --control-orange-990: #2E1305;
+
+  /* ---- Escala neutral ---- */
+  --control-neutral-50: #F8F8F9;
+  --control-neutral-100: #F0F0F2;
+  --control-neutral-200: #E2E2E7;
+  --control-neutral-300: #CDCBD5;
+  --control-neutral-400: #B1AFBE;
+  --control-neutral-500: #9390A4;
+  --control-neutral-600: #76728B;
+  --control-neutral-700: #5B586C;
+  --control-neutral-800: #444150;
+  --control-neutral-900: #312F3A;
+  --control-neutral-950: #222129;
+  --control-neutral-990: #18171C;
+
+  /* ---- Semánticos: base, fondo suave y tinta ---- */
+  --control-exito: #2FC48A;
+  --control-exito-suave: #DEEDE7;
+  --control-exito-tinta: #1C7653;
+  --control-atencion: #F5B22E;
+  --control-atencion-suave: #F1E9DA;
+  --control-atencion-tinta: #8E6007;
+  --control-peligro: #F2555A;
+  --control-peligro-suave: #F0DBDB;
+  --control-peligro-tinta: #C50F15;
+  --control-informacion: #539BF5;
+  --control-informacion-suave: #DAE4F1;
+  --control-informacion-tinta: #0C60C9;
+
+  /* ---- Series de gráfico, en orden ---- */
+  --control-serie-1: #6B5BC0;
+  --control-serie-2: #EF5F18;
+  --control-serie-3: #9390A4;
+  --control-serie-4: #2FC48A;
+  --control-serie-5: #539BF5;
+  --control-serie-6: #F5B22E;
+  --control-serie-7: #F2555A;
+
+  /* ---- Roles · tema claro ---- */
+  --control-fondo-carcasa: #100C27;
+  --control-fondo-carcasa-sutil: #392A8C;
+  --control-fondo-lienzo: #F7F7FA;
+  --control-fondo-tarjeta: #FFFFFF;
+  --control-fondo-sutil: #F0F0F2;
+  --control-fondo-invertido: #261A66;
+  --control-fondo-accion: #EF5F18;
+  --control-texto-sobre-carcasa: #F0F0F2;
+  --control-texto-sobre-carcasa-sutil: #B1AFBE;
+  --control-texto-principal: #261A66;
+  --control-texto-secundario: #444150;
+  --control-texto-terciario: #5B586C;
+  --control-texto-deshabilitado: #9390A4;
+  --control-texto-sobre-accion: #100C27;
+  --control-texto-sobre-peligro: #FFFFFF;
+  --control-texto-sobre-invertido: #FFFFFF;
+  --control-texto-acento: #993B0D;
+  --control-borde-sutil: #E2E2E7;
+  --control-borde-control: #76728B;
+  --control-borde-accion: #EF5F18;
+  --control-foco: #EF5F18;
+  --control-estado-exito: #2FC48A;
+  --control-estado-exito-suave: #DEEDE7;
+  --control-estado-exito-tinta: #1C7653;
+  --control-estado-atencion: #F5B22E;
+  --control-estado-atencion-suave: #F1E9DA;
+  --control-estado-atencion-tinta: #8E6007;
+  --control-estado-peligro: #F2555A;
+  --control-estado-peligro-suave: #F0DBDB;
+  --control-estado-peligro-tinta: #C50F15;
+  --control-estado-informacion: #539BF5;
+  --control-estado-informacion-suave: #DAE4F1;
+  --control-estado-informacion-tinta: #0C60C9;
+
+  /* ---- Tipografía ---- */
+  --control-fuente-titulos: 'Space Grotesk', system-ui, sans-serif;
+  --control-fuente-cuerpo: 'Inter', system-ui, sans-serif;
+  --control-fuente-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --control-texto-xs: 11px;
+  --control-interlinea-xs: 16px;
+  --control-texto-sm: 13px;
+  --control-interlinea-sm: 20px;
+  --control-texto-base: 15px;
+  --control-interlinea-base: 24px;
+  --control-texto-lg: 18px;
+  --control-interlinea-lg: 28px;
+  --control-texto-xl: 22px;
+  --control-interlinea-xl: 30px;
+  --control-texto-2xl: 28px;
+  --control-interlinea-2xl: 36px;
+  --control-texto-3xl: 36px;
+  --control-interlinea-3xl: 44px;
+  --control-texto-4xl: 46px;
+  --control-interlinea-4xl: 52px;
+  --control-peso-normal: 400;
+  --control-peso-medio: 500;
+  --control-peso-fuerte: 600;
+  --control-peso-titulo: 700;
+  --control-cifras: tabular-nums;
+
+  /* ---- Geometría ---- */
+  --control-esp-1: 4px;
+  --control-esp-2: 8px;
+  --control-esp-3: 12px;
+  --control-esp-4: 16px;
+  --control-esp-5: 20px;
+  --control-esp-6: 24px;
+  --control-esp-8: 32px;
+  --control-esp-10: 40px;
+  --control-esp-12: 48px;
+  --control-esp-16: 64px;
+  --control-radio-sm: 8px;
+  --control-radio: 12px;
+  --control-radio-lg: 18px;
+  --control-radio-full: 999px;
+  --control-sombra-sm: 0 1px 2px rgba(38, 26, 102, 0.06);
+  --control-sombra: 0 2px 8px rgba(38, 26, 102, 0.08);
+  --control-sombra-lg: 0 8px 24px rgba(38, 26, 102, 0.12);
+  --control-dur-rapida: 120ms;
+  --control-dur-normal: 200ms;
+  --control-dur-lenta: 320ms;
+  --control-curva: cubic-bezier(0.2, 0, 0, 1);
+  --control-ancho-carcasa: 248px;
+  --control-ancho-carcasa-colapsada: 64px;
+  --control-alto-encabezado: 60px;
+  --control-ancho-max-contenido: 1600px;
+  --control-objetivo-tactil: 44px;
+  --control-densidad: 1;
+  --control-alto-fila: calc(44px * var(--control-densidad));
+  --control-alto-control: calc(38px * var(--control-densidad));
+}
+
+/*
+ * Tema oscuro: el mismo sistema con otros valores.
+ *
+ * Su regla propia es que TODA superficie lleva borde. No es estética: sobre la
+ * familia violeta las superficies entre sí no pasan de 1,6:1, así que el borde es
+ * el único separador disponible para cumplir 1.4.11.
+ */
+[data-tema="oscuro"] {
+  /* ---- Roles · tema oscuro ---- */
+  --control-fondo-carcasa: #130D36;
+  --control-fondo-carcasa-sutil: #261A66;
+  --control-fondo-lienzo: #100C27;
+  --control-fondo-tarjeta: #1E154C;
+  --control-fondo-sutil: #1A1243;
+  --control-fondo-invertido: #261A66;
+  --control-fondo-accion: #EF5F18;
+  --control-texto-sobre-carcasa: #F0F0F2;
+  --control-texto-sobre-carcasa-sutil: #B1AFBE;
+  --control-texto-principal: #F0F0F2;
+  --control-texto-secundario: #CDCBD5;
+  --control-texto-terciario: #B1AFBE;
+  --control-texto-deshabilitado: #9390A4;
+  --control-texto-sobre-accion: #100C27;
+  --control-texto-sobre-peligro: #100C27;
+  --control-texto-sobre-invertido: #FFFFFF;
+  --control-texto-acento: #E5A485;
+  --control-borde-sutil: #3D3165;
+  --control-borde-control: #8C81C9;
+  --control-borde-accion: #EF5F18;
+  --control-foco: #EF5F18;
+  --control-estado-exito: #2FC48A;
+  --control-estado-exito-suave: #082319;
+  --control-estado-exito-tinta: #2FC48A;
+  --control-estado-atencion: #F5B22E;
+  --control-estado-atencion-suave: #2C2008;
+  --control-estado-atencion-tinta: #F5B22E;
+  --control-estado-peligro: #F2555A;
+  --control-estado-peligro-suave: #2C0F10;
+  --control-estado-peligro-tinta: #F2555A;
+  --control-estado-informacion: #539BF5;
+  --control-estado-informacion-suave: #0F1C2C;
+  --control-estado-informacion-tinta: #539BF5;
+
+  /* ---- Elevación ---- */
+  --control-sombra-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --control-sombra: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --control-sombra-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+/* El modo reducido se aplica globalmente, no componente por componente. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --control-dur-rapida: 0ms;
+    --control-dur-normal: 0ms;
+    --control-dur-lenta: 0ms;
+  }
+}

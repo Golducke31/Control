@@ -1,0 +1,26 @@
+{
+  "name": "@control/tokens",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tokens del sistema de diseño de Control. Fuente única de color, tipografía y geometría.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens.css": "./generated/tokens.css",
+    "./theme": "./generated/theme.ts",
+    "./tokens.json": "./generated/tokens.json"
+  },
+  "files": [
+    "src",
+    "generated"
+  ],
+  "scripts": {
+    "generate": "node src/generar-cli.ts",
+    "check": "node src/generar-cli.ts --check",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

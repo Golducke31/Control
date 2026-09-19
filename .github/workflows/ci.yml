@@ -660,11 +660,59 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      - name: tsc --noEmit (raíz)
-        run: npx tsc --noEmit
+      # El typecheck recorre los cuatro workspaces, cada uno con su propia
+      # configuración, y antes **afirma la cobertura**: si un workspace no declara
+      # cómo se chequea, el job falla con el mensaje que dice qué agregar.
+      #
+      # Antes esto era `npx tsc --noEmit` en la raíz, y funcionaba mientras todo el
+      # TypeScript del repositorio resolvía para Node. Dejó de funcionar al aparecer
+      # `apps/web` —JSX, tipos del DOM, resolución de empaquetador—: la raíz ya no
+      # puede ser el piso, así que el piso pasó a ser una aserción de cobertura.
+      - name: Typecheck de todos los workspaces
+        run: npm run typecheck
 
-      - name: tsc --noEmit (API)
-        run: npm run typecheck --workspace @control/api
+  # ---------------------------------------------------------------------------
+  # 4b · Frontend. Verifica el sistema de diseño y la arquitectura de información,
+  #      que son las dos cosas que este repositorio no puede dejar degradar en
+  #      silencio: un color escrito a mano y una ventana sin página.
+  # ---------------------------------------------------------------------------
+  web:
+    name: Frontend y sistema de diseño
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Los artefactos de tokens coinciden con su fuente
+        run: npm run verify:tokens-sync
+
+      - name: Sin literales de color, tipografía ni tamaño
+        run: npm run verify:tokens
+
+      - name: Suites del sistema de diseño y del mapa de rutas
+        run: npm test --workspaces --if-present
+
+      - name: Verificar que las suites corrieron (no un verde vacío)
+        run: |
+          set -euo pipefail
+          OUT=$(npm test --workspaces --if-present 2>&1)
+          echo "$OUT" | tail -20
+          PASS=$(echo "$OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p' | awk '{s+=$1} END {print s+0}')
+          if [ -z "$PASS" ] || [ "$PASS" -lt 1 ]; then
+            echo "::error::No se ejecutó ninguna verificación. Un job verde sin verificar es peor que uno ausente."
+            exit 1
+          fi
+          echo "verificaciones ejecutadas: $PASS"
+
+      - name: Compilar la aplicación
+        run: npm run build --workspace @control/web
 
   # ---------------------------------------------------------------------------
   # 5 · Tests unitarios. No existía ninguno. Cubren la lógica que no necesita

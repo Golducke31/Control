@@ -9,6 +9,13 @@
 - [`PLAN-ERP-MULTIEMPRESA.md`](PLAN-ERP-MULTIEMPRESA.md) — brechas funcionales y fases E0–E9. **Este plan se ejecuta en paralelo a E7**, no lo reemplaza.
 - `prototype/index.html` — prototipo de diseño que este plan reemplaza.
 
+> **Estado de ejecución.** La fase **F1 · Fundaciones** está implementada y verificada: `packages/tokens` (escalas derivadas, generador y suite de contraste), `packages/ui`, `apps/web` con la carcasa y las catorce ventanas navegables, los dos lints nuevos y el job `web` del CI. Lo que sigue es **F2 · Identidad y acceso**.
+>
+> Tres ajustes respecto de lo planeado, decididos al implementar y documentados donde corresponden:
+> 1. `packages/contracts` y `packages/graficos` se crean en **F3** y **F4**, con su primer consumidor real, no en F1: un paquete sin consumidor es un lastre que nadie mantiene.
+> 2. Las suites de lógica pura corren con el runner integrado de Node (`node --test`), como las de la API, y **sin dependencias de prueba**. Vitest y Playwright entran en F3, cuando haya componentes que renderizar y flujos que recorrer.
+> 3. El atributo del tema es `data-tema="oscuro"` y no `data-theme="dark"`: el repositorio entero —esquema, código y documentos— está en español, y mezclar idiomas en el contrato de tokens habría sido la primera inconsistencia de muchas.
+
 ---
 
 ## Tabla de contenidos
@@ -211,7 +218,7 @@ Armonizados con el lienzo violeta, no importados de una paleta genérica:
 
 Cada semántico tiene siempre **tres** valores y se usan en el rol que corresponde: el claro como fondo, el profundo como tinta sobre fondo claro, y la base como icono o texto sobre el lienzo oscuro.
 
-**La tinta profunda no es «la base más oscura», es la más viva que todavía cumple.** Se calculó buscando, para cada semántico, la luminosidad más alta que mantiene 4,5:1 sobre su propio fondo claro: de ahí los valores por encima del mínimo (4,55:1 a 4,63:1) en lugar de tintas innecesariamente oscuras. Usar la base como texto sobre el fondo claro es el error más común de esta familia —`#2FC48A` sobre `#DEEDE7` da 1,8:1— y el lint de contraste lo detecta.
+**La tinta profunda no es «la base más oscura», es la más viva que todavía cumple.** Se calculó buscando, para cada semántico, la luminosidad más alta que mantiene 4,5:1 sobre su propio fondo claro: de ahí los valores por encima del mínimo (4,55:1 a 4,63:1) en lugar de tintas innecesariamente oscuras. Usar la base como texto sobre el fondo claro es el error más común de esta familia —`#2FC48A` sobre `#DEEDE7` da 1,85:1— y el lint de contraste lo detecta.
 
 ### 3.4 Arquitectura de temas: carcasa oscura, área de trabajo clara
 
@@ -600,7 +607,7 @@ Se adopta el que `PLAN-PRODUCCION.md` §3.3 ya decidió, con las concreciones qu
 | Gráficos | **visx + SVG propio** | Migrando los del prototipo |
 | Estado de interfaz | **Zustand**, mínimo | Sólo lo que no es servidor ni URL |
 | Internacionalización | **next-intl** | `es-AR` primero; preparado para `pt-BR` y `es-MX` |
-| Pruebas | **Vitest** + Testing Library · **Playwright** (E2E) · **axe-core** (a11y) | |
+| Pruebas | **`node --test`** para la lógica pura · **Vitest** + Testing Library y **Playwright** desde F3 | Node 22 ejecuta TypeScript directamente, así que las suites de tokens y de rutas no tienen ninguna dependencia. Vitest entra cuando haya componentes que renderizar y Playwright cuando haya flujos que recorrer |
 | Datos simulados | **MSW** | Es la pieza que permite construir el frontend antes del backend |
 
 ### 5.2 Estructura del monorepo
@@ -634,6 +641,8 @@ Control/
 │   ├── graficos/                   # NUEVO · primitivos de gráfico y series por dominio
 │   └── shared/                     # existente
 ```
+
+**Sobre el orden de creación de los paquetes.** `tokens` y `ui` existen desde F1 porque la carcasa los necesita. `contracts` y `graficos` **no**: se crean en F3 y F4, con su primer consumidor real. Un paquete vacío no es una estructura preparada, es un lastre: nadie lo mantiene, no tiene tests y su forma se decide igual el día que aparece el primer uso —sólo que sin la presión de tener que usarlo—.
 
 **Por qué `rutas.ts` es un archivo y no una convención.** El menú, las guardas, los títulos, las migas, las banderas de funcionalidad y los tests tienen que coincidir. Si cada uno se deriva por su cuenta, tarde o temprano divergen — y el síntoma es un ítem de menú visible que lleva a un 403. Con un solo mapa tipado, eso no puede pasar y el test lo verifica.
 
@@ -847,10 +856,28 @@ Mecanismos: Server Components por defecto; una ventana por bundle (el punto de p
 
 Nueve fases. Cada una termina en un estado desplegable y verificado, no en «código escrito».
 
-### F1 · Fundaciones
-Monorepo con `apps/web` y los cuatro paquetes. `packages/tokens` con las escalas de §3.2 y el generador de CSS/TS/JSON. Tailwind v4 con `@theme`. Carcasa navegable con las 14 ventanas en el menú (vacías). Lint de tokens (sin colores literales). Lint de textos (sin cadenas literales). CI: `typecheck`, `lint`, `build`, suite de contraste.
+### F1 · Fundaciones — **implementada**
 
-**Puerta:** la carcasa navega las 14 ventanas; **cero literales de color**; la suite de contraste en verde; `next build` reporta el tamaño por ruta.
+Monorepo con `apps/web`, `packages/tokens` y `packages/ui`. `packages/tokens` con las escalas de §3.2 derivadas del ancla, el generador de CSS/TS/JSON con su modo de verificación, y la suite de contraste sobre los roles. Tailwind v4 con `@theme` mapeado a las variables de los tokens. Carcasa navegable con las 14 ventanas. Lint de literales de diseño. Aserción de cobertura de typecheck. Job `web` en el CI.
+
+**Verificado:**
+
+| Comprobación | Resultado |
+|---|---|
+| Las 14 ventanas responden contra el servidor de producción | 14/14 con su propio `<h1>`, 200, y el ítem activo marcado |
+| El menú se filtra por permisos | Un encargado de depósito ve 5 ventanas; el propietario, 14 |
+| El menú respeta las banderas de funcionalidad | Con `logistics.enabled=false` la ventana no aparece ni por URL |
+| Empresa inexistente | 404, no pantalla vacía |
+| Suite de contraste | 38 pares por tema, 0 violaciones en los dos temas |
+| Lint de literales | 0 hallazgos en 37 archivos; **falla** al inyectar un color a mano |
+| Sincronización de tokens | Falla si un artefacto no coincide con su fuente |
+| Suites | 36 (tokens) + 20 (rutas) + 21 (API) en verde |
+| Presupuesto de JS | 103 KB de First Load JS compartido, sobre un límite de 200 KB |
+| Validadores del repo | Los 8 en verde; el CI queda en 12 jobs |
+
+**Puerta:** la carcasa navega las 14 ventanas; cero literales de color; la suite de contraste en verde; `next build` reporta el tamaño por ruta. **Cumplida.**
+
+**Un alcance que se movió, y por qué.** El plan listaba en F1 un «lint de textos (sin cadenas literales)». No se implementó: sin la infraestructura de internacionalización, un lint así falla en todas partes y se termina desactivando —que es peor que no tenerlo—. El lint de literales de diseño **sí** quedó, porque los colores, las familias y los tamaños no dependen de la traducción. El lint de textos se implementa en **F8**, junto con `next-intl` y los archivos de mensajes.
 
 ### F2 · Identidad y acceso
 Ingreso (Google SSO y credenciales), verificación en dos pasos, recuperación, invitación, selector de empresa, resolución de sesión en el servidor, guardas por permiso, banderas de funcionalidad, cambio de empresa con descarte de cache, banda de impersonación.
@@ -883,7 +910,7 @@ Torre de control con mapa en vivo por SSE, Envíos, Flota, Incidencias, POD, tra
 **Puerta:** 200 envíos con **una sola** conexión SSE; la PWA funciona sin red y sincroniza al volver; el tracking público no expone datos de otros envíos.
 
 ### F8 · Gobierno, marca y plataforma
-Equipo, Configuración, Auditoría, Tareas, consola de plataforma, y las 5 plantillas de `app.ui_templates` aplicables en vivo.
+Equipo, Configuración, Auditoría, Tareas, consola de plataforma, y las 5 plantillas de `app.ui_templates` aplicables en vivo. Incluye el **lint de textos**: con `next-intl` y los archivos de mensajes en su lugar, ninguna cadena de interfaz puede quedar escrita en un componente.
 
 **Puerta:** las 4 paletas de inquilino y las 5 plantillas pasan AA; cambiar de plantilla no recarga; la consola de plataforma está en dominio aparte y un `owner` no entra.
 
@@ -1083,7 +1110,7 @@ El criterio 5 es el que responde al pedido de «preparado para continuar con el 
 /* Tema oscuro: mismo conjunto de tokens, valores distintos.
    TODA superficie lleva borde: en esta familia la elevación no se puede
    expresar con luminosidad (máximo medido entre superficies: 1,60:1). */
-[data-theme='dark'] {
+[data-tema="oscuro"] {
   --fondo-carcasa:   var(--control-canvas);
   --fondo-lienzo:    var(--control-scarlet-990);
   --fondo-tarjeta:   var(--control-canvas-deep);

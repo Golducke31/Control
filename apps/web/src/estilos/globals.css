@@ -1,0 +1,171 @@
+/*
+ * Estilos de la aplicación.
+ *
+ * El tema NO se declara acá: se mapea. Cada utilidad de Tailwind apunta a una
+ * variable de `@control/tokens`, así que no existe un segundo lugar donde un color
+ * pueda definirse y divergir. El lint de tokens lo verifica: cualquier literal de
+ * color fuera del paquete de tokens rompe el build.
+ *
+ * Se usa `@theme inline` para que la utilidad lleve la variable directa
+ * (`background-color: var(--control-fondo-tarjeta)`) en vez de dar un salto extra por
+ * una variable intermedia. El efecto práctico es que el tema oscuro funciona sin
+ * tocar nada: alcanza con que `[data-tema="oscuro"]` redefina las variables.
+ */
+
+@import 'tailwindcss';
+
+/* Los componentes del paquete de interfaz también se escanean. */
+@source '../../../../packages/ui/src';
+
+/*
+ * Las familias que `next/font` sirve desde nuestro origen reemplazan a las del token,
+ * conservando la cadena de reserva del sistema de diseño. Se usa el parámetro de
+ * reserva de `var()` para que la declaración siga siendo válida si la variable de la
+ * fuente no existe —por ejemplo en una prueba que no monta el layout—.
+ */
+:root {
+  --control-fuente-titulos: var(--fuente-titulos, 'Space Grotesk'), system-ui, sans-serif;
+  --control-fuente-cuerpo: var(--fuente-cuerpo, 'Inter'), system-ui, sans-serif;
+}
+
+@theme inline {
+  /* ---- Superficies ---- */
+  --color-carcasa: var(--control-fondo-carcasa);
+  --color-carcasa-sutil: var(--control-fondo-carcasa-sutil);
+  --color-lienzo: var(--control-fondo-lienzo);
+  --color-tarjeta: var(--control-fondo-tarjeta);
+  --color-sutil: var(--control-fondo-sutil);
+  --color-invertido: var(--control-fondo-invertido);
+  --color-accion: var(--control-fondo-accion);
+
+  /* ---- Texto ---- */
+  --color-principal: var(--control-texto-principal);
+  --color-secundario: var(--control-texto-secundario);
+  --color-terciario: var(--control-texto-terciario);
+  --color-deshabilitado: var(--control-texto-deshabilitado);
+  --color-sobre-carcasa: var(--control-texto-sobre-carcasa);
+  --color-sobre-carcasa-sutil: var(--control-texto-sobre-carcasa-sutil);
+  --color-sobre-accion: var(--control-texto-sobre-accion);
+  --color-sobre-peligro: var(--control-texto-sobre-peligro);
+  --color-sobre-invertido: var(--control-texto-sobre-invertido);
+  --color-acento: var(--control-texto-acento);
+
+  /* ---- Bordes y foco ---- */
+  --color-borde-sutil: var(--control-borde-sutil);
+  --color-borde-control: var(--control-borde-control);
+  --color-borde-accion: var(--control-borde-accion);
+  --color-foco: var(--control-foco);
+
+  /* ---- Estados: base para fondos oscuros, suave para fondos, tinta para texto ---- */
+  --color-exito: var(--control-estado-exito);
+  --color-exito-suave: var(--control-estado-exito-suave);
+  --color-exito-tinta: var(--control-estado-exito-tinta);
+
+  --color-atencion: var(--control-estado-atencion);
+  --color-atencion-suave: var(--control-estado-atencion-suave);
+  --color-atencion-tinta: var(--control-estado-atencion-tinta);
+
+  --color-peligro: var(--control-estado-peligro);
+  --color-peligro-suave: var(--control-estado-peligro-suave);
+  --color-peligro-tinta: var(--control-estado-peligro-tinta);
+  /* Relleno del botón de peligro: la tinta profunda en tema claro, la base en oscuro. */
+  --color-peligro-solido: var(--control-estado-peligro-tinta);
+
+  --color-informacion: var(--control-estado-informacion);
+  --color-informacion-suave: var(--control-estado-informacion-suave);
+  --color-informacion-tinta: var(--control-estado-informacion-tinta);
+
+  /* ---- Series de gráfico ---- */
+  --color-serie-1: var(--control-serie-1);
+  --color-serie-2: var(--control-serie-2);
+  --color-serie-3: var(--control-serie-3);
+  --color-serie-4: var(--control-serie-4);
+  --color-serie-5: var(--control-serie-5);
+  --color-serie-6: var(--control-serie-6);
+  --color-serie-7: var(--control-serie-7);
+
+  /* ---- Tipografía ---- */
+  --font-titulos: var(--control-fuente-titulos);
+  --font-cuerpo: var(--control-fuente-cuerpo);
+  --font-mono: var(--control-fuente-mono);
+
+  --text-xs: var(--control-texto-xs);
+  --text-xs--line-height: var(--control-interlinea-xs);
+  --text-sm: var(--control-texto-sm);
+  --text-sm--line-height: var(--control-interlinea-sm);
+  --text-base: var(--control-texto-base);
+  --text-base--line-height: var(--control-interlinea-base);
+  --text-lg: var(--control-texto-lg);
+  --text-lg--line-height: var(--control-interlinea-lg);
+  --text-xl: var(--control-texto-xl);
+  --text-xl--line-height: var(--control-interlinea-xl);
+  --text-2xl: var(--control-texto-2xl);
+  --text-2xl--line-height: var(--control-interlinea-2xl);
+  --text-3xl: var(--control-texto-3xl);
+  --text-3xl--line-height: var(--control-interlinea-3xl);
+  --text-4xl: var(--control-texto-4xl);
+  --text-4xl--line-height: var(--control-interlinea-4xl);
+
+  /* ---- Elevación ---- */
+  --shadow-sm: var(--control-sombra-sm);
+  --shadow-md: var(--control-sombra);
+  --shadow-lg: var(--control-sombra-lg);
+
+  /* ---- Movimiento ---- */
+  --ease-control: var(--control-curva);
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    /* El desplazamiento suave se desactiva globalmente con el modo reducido. */
+    scroll-behavior: smooth;
+  }
+
+  [data-tema='oscuro'] {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--control-fondo-lienzo);
+    color: var(--control-texto-principal);
+    font-family: var(--control-fuente-cuerpo);
+    font-size: var(--control-texto-base);
+    line-height: var(--control-interlinea-base);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--control-fuente-titulos);
+    font-weight: var(--control-peso-fuerte);
+  }
+
+  /*
+   * Cifras tabulares en todo lo numérico.
+   *
+   * Sin esto los importes bailan al ordenar y leer una columna se vuelve imposible.
+   * Es una clase y no un selector automático porque marcar «esto es un número» no se
+   * puede deducir del HTML: lo decide quien escribe la tabla.
+   */
+  .cifras {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* El foco es visible siempre, y con el naranja de acción. */
+  :focus-visible {
+    outline: 2px solid var(--control-foco);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}

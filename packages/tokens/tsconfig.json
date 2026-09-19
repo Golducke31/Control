@@ -1,0 +1,42 @@
+{
+  // ===========================================================================
+  // packages/tokens · configuración propia
+  // ===========================================================================
+  // Este paquete NO se compila: Node lo ejecuta directamente con su borrado de
+  // tipos (type stripping). Por eso el compilador exige que la sintaxis sea
+  // exactamente la que el runtime puede borrar:
+  //
+  //   · `erasableSyntaxOnly` — prohíbe `enum`, `namespace` y los parámetros de
+  //     constructor con modificadores, que Node no puede ejecutar sin compilar.
+  //   · `verbatimModuleSyntax` — obliga a `import type` en los imports de sólo
+  //     tipos, que es lo que el borrado necesita para saber qué eliminar.
+  //   · `allowImportingTsExtensions` — los imports relativos llevan `.ts`, como
+  //     los resuelve Node en tiempo de ejecución.
+  //
+  // El efecto neto: si el archivo compila, Node lo ejecuta. No hay un paso de
+  // build entre el código y su verificación.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "isolatedModules": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts", "generated/**/*.ts"],
+  "exclude": ["node_modules"]
+}

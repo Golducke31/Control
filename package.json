@@ -11,15 +11,20 @@
     "packages/*"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit && npm run typecheck --workspace @control/api",
-    "test": "npm run test --workspace @control/api",
-    "build": "npm run build --workspace @control/api",
+    "typecheck": "node tools/check-workspace-typecheck.mjs && npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "dev:web": "npm run dev --workspace @control/web",
+    "tokens": "npm run generate --workspace @control/tokens",
     "verify:partitions": "node tools/check-partitioned-tables.mjs",
     "verify:composite-fks": "node tools/check-composite-fks.mjs",
     "verify:migration-order": "node tools/check-migration-order.mjs",
     "verify:suite-sql": "node tools/check-suite-sql.mjs",
     "verify:workflow": "node tools/validate-workflow.mjs",
-    "verify": "npm run verify:composite-fks && npm run verify:migration-order && npm run verify:partitions && npm run verify:suite-sql && npm run verify:workflow"
+    "verify:tokens": "node tools/check-token-literals.mjs",
+    "verify:tokens-sync": "npm run check --workspace @control/tokens",
+    "verify:typecheck-coverage": "node tools/check-workspace-typecheck.mjs",
+    "verify": "npm run verify:composite-fks && npm run verify:migration-order && npm run verify:partitions && npm run verify:suite-sql && npm run verify:workflow && npm run verify:tokens && npm run verify:tokens-sync && npm run verify:typecheck-coverage"
   },
   "devDependencies": {
     "@types/node": "^22.5.0",

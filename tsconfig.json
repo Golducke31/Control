@@ -1,42 +1,39 @@
 {
   // ===========================================================================
-  // Configuración base del monorepo · Control
+  // Configuración de solución del monorepo · Control
   // ===========================================================================
-  // Cubre el TypeScript de TODOS los workspaces (`apps/*`, `packages/*`), así que
-  // un workspace nuevo queda chequeado sin tocar el CI ni este archivo.
+  // Este archivo NO es el piso de typecheck: es el índice de los cuatro proyectos.
+  // El chequeo real lo corre `npm run typecheck`, que primero **afirma la cobertura**
+  // —todo workspace tiene que declarar cómo se chequea— y después recorre cada uno con
+  // su propia configuración.
   //
-  // POR QUÉ TIENE UN `include` REAL Y NO ESTÁ VACÍO
+  // POR QUÉ DEJÓ DE SER EL PISO
   //
-  // Hasta acá este archivo declaraba `"include": []` y `"files": []`, y el job
-  // `typecheck` del CI corre `npx tsc --noEmit` en la raíz. Con las dos listas
-  // vacías TypeScript aborta con TS18002 («The 'files' list in config file is
-  // empty») ANTES de mirar un solo archivo: el job fallaba siempre y con él el
-  // pipeline entero, así que ningún gate del repositorio quedaba enforced —las
-  // ~950 verificaciones de las suites corrían y su resultado se perdía detrás de
-  // un job rojo que no decía nada del código—.
+  // Durante un tiempo este archivo declaraba `include: ["apps/*/src", "packages/*/src"]`
+  // y el CI corría `npx tsc --noEmit` en la raíz. Ese diseño tenía un techo: cubría el
+  // TypeScript que resuelve para Node, y una aplicación web necesita JSX, tipos del DOM
+  // y resolución de empaquetador. Al aparecer `apps/web` —y con él `packages/tokens` y
+  // `packages/ui`, que tampoco resuelven para Node— el piso ya no podía cubrirlos.
   //
-  // El defecto viene de E0, que arregló que el typecheck se SALTEARA en silencio
-  // (no había `package.json` en la raíz) y lo dejó fallando siempre. Un chequeo
-  // que no puede pasar es tan inútil como uno que no corre, y más difícil de ver.
+  // La salida fácil habría sido exceptuarlos con un `exclude`, y ahí el olvido vuelve a
+  // ser silencioso: un workspace nuevo que nadie exceptúa rompe el build por una razón
+  // confusa, y uno que nadie agrega al `exclude` deja de chequearse sin que nadie lo note.
   //
-  // RELACIÓN CON `apps/api/tsconfig.json`
+  // Ahora la cobertura se afirma en `tools/check-workspace-typecheck.mjs`: si un
+  // workspace no declara su `typecheck`, el build falla con el mensaje que dice qué
+  // agregar. Es el mismo criterio que `assert_rls_coverage()` en la base de datos y que
+  // el lint de literales de diseño: lo que tiene que estar cubierto se declara, no se
+  // supone.
   //
-  // Ése declara su propio `include` y es MÁS estricto (`noUncheckedIndexedAccess`,
-  // `exactOptionalPropertyTypes`, `noFallthroughCasesInSwitch`, `isolatedModules`,
-  // `verbatimModuleSyntax`), así que es el chequeo autoritativo de la API. Éste es
-  // el piso: garantiza que ningún workspace quede sin chequear por olvido.
-  "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022"],
-    "module": "NodeNext",
-    "moduleResolution": "nodenext",
-    "types": ["node"],
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "esModuleInterop": true
-  },
-  "include": ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts"],
-  "exclude": ["**/node_modules", "**/dist", "**/dist-test"]
+  // `files: []` con `references` no vacío es la forma válida de una configuración de
+  // solución. Sin las referencias, TypeScript aborta con TS18002 —el mismo error que
+  // tuvo este archivo cuando declaraba `files: []` e `include: []` a la vez, y que dejó
+  // el job de typecheck en rojo sin haber compilado una línea—.
+  "files": [],
+  "references": [
+    { "path": "./apps/api" },
+    { "path": "./apps/web" },
+    { "path": "./packages/tokens" },
+    { "path": "./packages/ui" }
+  ]
 }

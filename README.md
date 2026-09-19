@@ -1194,7 +1194,7 @@ Control/
 ├── README.md
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                                # 11 jobs: migraciones, lint RLS, aislamiento, contable, compras, tesorería, fiscal, ventas, typecheck, unit, secretos
+│       └── ci.yml                                # 12 jobs: migraciones, lint RLS, aislamiento, contable, compras, tesorería, fiscal, ventas, typecheck, frontend, unit, secretos
 ├── db/
 │   ├── migrations/
 │   │   ├── 0001_extensions_and_helpers.sql    # Extensiones, tipos, helpers de sesión
@@ -1225,29 +1225,49 @@ Control/
 │   └── seed/
 │       └── 0001_system_catalog.sql            # Permisos, roles de sistema, plantillas
 ├── apps/
-│   └── api/
-│       ├── package.json / tsconfig*.json      # Manifiestos reales: el typecheck raíz cubre todos los workspaces
+│   ├── api/
+│   │   ├── package.json / tsconfig.json       # Cada workspace declara su typecheck; el tsconfig raíz es el índice
+│   │   └── src/
+│   │       ├── jobs/
+│   │       │   ├── job-runner.ts              # ★ Runner con ledger, modo plataforma, 7 jobs
+│   │       │   ├── scheduler.ts               # Interpretación de cadencias cron
+│   │       │   ├── worker.ts                  # Arranque del worker
+│   │       │   ├── scheduler.test.ts          # Tests unitarios del scheduler
+│   │       │   └── job-catalog.test.ts        # Catálogo de jobs ↔ cadencia declarada
+│   │       ├── modules/
+│   │       │   ├── tenancy/
+│   │       │   │   └── tenant-context.service.ts   # ★ Contexto, middleware, guards
+│   │       │   ├── afip/
+│   │       │   │   ├── wsaa.client.ts              # Autenticación AFIP (TRA, CMS, TA)
+│   │       │   │   └── wsfe.client.ts              # Emisión de CAE (FECAESolicitar)
+│   │       │   ├── fiscal/
+│   │       │   │   ├── fiscal-driver.ts            # Contrato neutral multi-país
+│   │       │   │   └── drivers/
+│   │       │   │       └── afip.driver.ts          # Implementación AFIP del contrato
+│   │       │   └── exports/
+│   │       │       └── report.service.ts           # XLSX/PDF con identidad dinámica
+│   │       └── realtime/
+│   │           └── tracking.service.ts             # WS/SSE, bus por tenant, máquina de estados
+│   └── web/
+│       ├── package.json / tsconfig.json / next.config.ts
 │       └── src/
-│           ├── jobs/
-│           │   ├── job-runner.ts              # ★ Runner con ledger, modo plataforma, 7 jobs
-│           │   ├── scheduler.ts               # Interpretación de cadencias cron
-│           │   ├── worker.ts                  # Arranque del worker
-│           │   ├── scheduler.test.ts          # Tests unitarios del scheduler
-│           │   └── job-catalog.test.ts        # Catálogo de jobs ↔ cadencia declarada
-│           ├── modules/
-│           │   ├── tenancy/
-│           │   │   └── tenant-context.service.ts   # ★ Contexto, middleware, guards
-│           │   ├── afip/
-│           │   │   ├── wsaa.client.ts              # Autenticación AFIP (TRA, CMS, TA)
-│           │   │   └── wsfe.client.ts              # Emisión de CAE (FECAESolicitar)
-│           │   ├── fiscal/
-│           │   │   ├── fiscal-driver.ts            # Contrato neutral multi-país
-│           │   │   └── drivers/
-│           │   │       └── afip.driver.ts          # Implementación AFIP del contrato
-│           │   └── exports/
-│           │       └── report.service.ts           # XLSX/PDF con identidad dinámica
-│           └── realtime/
-│               └── tracking.service.ts             # WS/SSE, bus por tenant, máquina de estados
+│           ├── rutas.ts                       # ★ El mapa de ventanas: fuente del menú, de las guardas y de los tests
+│           ├── rutas.test.ts                  # ★ Suite del mapa: permisos, duplicados y página por ventana
+│           ├── empresa.ts                     # Empresas de demostración (F2 las reemplaza por la sesión)
+│           ├── app/
+│           │   ├── layout.tsx                 # Raíz: tokens, tipografía, estilos
+│           │   └── e/[slug]/
+│           │       ├── layout.tsx             # ★ La carcasa
+│           │       └── <ventana>/page.tsx     # 14 ventanas, una ruta cada una
+│           ├── componentes/                   # Carcasa, barra lateral, menú móvil, migas, iconos
+│           └── estilos/globals.css            # @theme: el puente entre los tokens y Tailwind
+├── packages/
+│   ├── tokens/                                # ★ Sistema de diseño: la fuente única del color
+│   │   ├── src/                               # escalas, roles, contraste, derivación, verificación
+│   │   ├── src/*.test.ts                      # Suite de contraste, con pruebas negativas
+│   │   └── generated/                         # tokens.css · theme.ts · tokens.json (commiteados)
+│   └── ui/                                    # ★ Componentes sin lógica de negocio
+│       └── src/                               # Botón, Tarjeta, Insignia, Esqueleto, EstadoVacio…
 ├── tests/
 │   ├── _apply_migrations.mjs                   # Aplica la cadena completa sobre base limpia
 │   ├── isolation/                              # ★ Aislamiento multi-tenant (descubre tablas desde pg_class)
@@ -1264,14 +1284,16 @@ Control/
 │   ├── check-suite-sql.mjs                     # Valida el SQL embebido en las suites
 │   ├── check-migration-order.mjs               # Referencias FK hacia adelante
 │   ├── check-composite-fks.mjs                 # FK compuesta sin UNIQUE / FK simple a tabla con tenant_id
-│   └── check-partitioned-tables.mjs            # PK/UNIQUE en particionadas sin la clave de partición
+│   ├── check-partitioned-tables.mjs            # PK/UNIQUE en particionadas sin la clave de partición
+│   ├── check-token-literals.mjs                # ★ Sin colores, tipografías ni tamaños escritos a mano
+│   └── check-workspace-typecheck.mjs           # ★ Todo workspace declara cómo se chequea
 ├── docs/
 │   ├── PLAN-PRODUCCION.md                      # Plan a producción multinacional
 │   ├── PLAN-ERP-MULTIEMPRESA.md                # Plan de evolución a ERP multiempresa
 │   ├── PLAN-FRONTEND-PRODUCCION.md             # ★ Frontend de producción: sistema de diseño y ventanas
 │   └── adr/                                    # ADR 0001–0006 (decisiones irreversibles)
 └── prototype/
-    └── index.html                              # Prototipo de diseño (lo reemplaza el plan de frontend)
+    └── index.html                              # Prototipo de diseño, reemplazado por apps/web
 ```
 
 ### Archivos clave
@@ -1432,15 +1454,35 @@ Para validar el SQL embebido en la suite sin un motor disponible (hay comentario
 node tools/check-suite-sql.mjs tests/isolation/run.mjs
 ```
 
-### 12.5 Prototipo
+### 12.5 Frontend
 
-Abrir `prototype/index.html` en cualquier navegador. No requiere build ni servidor: es autocontenido. Funcionalidades demostrables:
+```bash
+npm install                     # instala los cuatro workspaces
+npm run dev:web                 # servidor de desarrollo en http://localhost:3000
+npm run build --workspace @control/web
+```
 
-- Switcher de empresa con cuatro inquilinos, cada uno con su paleta y densidad (el cambio de tokens es visible en toda la interfaz, gráficos incluidos).
-- Gráficos SVG interactivos con tooltip (curva suavizada, dona, sparklines).
-- Selección de plantilla por rubro.
-- Simulación de eventos de tracking en vivo (botón e intervalo automático cada 9 s) con máquina de estados y toasts.
-- Exportación simulada, mostrando qué identidad resuelve el servidor.
+La raíz redirige a `/e/andes/panel`. Hay tres empresas de demostración, y cambiar de una a otra **cambia el menú**: `andes` es propietaria y ve las catorce ventanas, `pampa` es encargada de depósito y ve cinco, y `nordico` tiene la logística desactivada, así que esa ventana no existe para ella ni por URL.
+
+**Cambiar un color del sistema.** Se edita el ancla en `packages/tokens/src/escalas.ts` —es lo único que se escribe a mano— y después:
+
+```bash
+npm run tokens                  # regenera tokens.css, theme.ts y tokens.json
+npm test --workspace @control/tokens   # vuelve a medir los 38 pares de contraste
+```
+
+**Las puertas que protegen el sistema:**
+
+| Comando | Qué impide |
+|---|---|
+| `npm run verify:tokens` | Un color, una tipografía o un tamaño escritos a mano |
+| `npm run verify:tokens-sync` | Que los artefactos generados se separen de su fuente |
+| `npm run verify:typecheck-coverage` | Un workspace que nadie verifica |
+| `npm test --workspace @control/web` | Una ventana en el menú sin su página, un permiso inexistente, una ruta repetida |
+
+### 12.6 Prototipo
+
+`prototype/index.html` es el prototipo de diseño que `apps/web` reemplaza. Se conserva como referencia de los gráficos SVG y del switcher de empresa. Abrirlo en cualquier navegador: no requiere build ni servidor.
 
 ---
 
@@ -1463,7 +1505,7 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Generación de PDF.** `PdfExportService` produce el HTML completo con la identidad aplicada; falta el *renderer* con Chromium headless (Playwright).
 - **Definición de rutas HTTP.** Los servicios están implementados con sus dependencias inyectadas; resta el cableado de los handlers de Fastify.
 - **Tests de integración** contra AFIP homologación con un CUIT de prueba.
-- **Frontend de producción.** El prototipo valida el diseño; falta la implementación en Next.js con componentes reutilizables. **Planificado en [`docs/PLAN-FRONTEND-PRODUCCION.md`](docs/PLAN-FRONTEND-PRODUCCION.md)**: sistema de tokens sobre la paleta indicada, una ventana por función (≈110 rutas, 14 ventanas raíz) y el contrato con la API.
+- **Frontend de producción.** La **F1 · Fundaciones** está hecha: el sistema de diseño en `packages/tokens`, los componentes base en `packages/ui`, y `apps/web` con la carcasa y las catorce ventanas navegables. Faltan F2 a F9 —acceso, datos, y el contenido de cada ventana— según [`docs/PLAN-FRONTEND-PRODUCCION.md`](docs/PLAN-FRONTEND-PRODUCCION.md), que también lleva el catálogo de ~90 endpoints que el frontend necesita del backend.
 - **Reconciliación de stock.** El job `stock.reconciliation` está implementado en `job-runner.ts` (cron `30 4 * * *`) y **reporta sin autocorregir**: la divergencia es un síntoma y no se puede saber cuál de las dos vistas es la equivocada. Queda pendiente decidir si la diferencia debe generar una alerta además de quedar en el ledger.
 - **Scheduler de infraestructura.** El ledger y el runner están implementados; falta el disparador externo (Kubernetes CronJob o el servicio gestionado que se elija) que invoque cada job según `JOB_SCHEDULE`. Mientras tanto, los jobs se pueden ejecutar a mano y quedan registrados igual.
 - **Alertas de jobs atrasados.** `ops.v_job_health` expone `is_overdue`, pero falta conectar esa vista al sistema de alertas.
@@ -1480,7 +1522,8 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **El precio no tenía vigencia ni escalas, y cambiarlo reescribía el pasado.** La migración `0023` (ADR `0006`) agrega vigencia y escalas por cantidad a `app.price_list_items` y `app.price_for()`, con una `EXCLUDE` que impide dos escalas solapadas y un `UNIQUE` parcial que admite una sola lista por defecto. El gate V-4 se mide en `tests/sales/run.mjs`. Ver [§3.12](#312-listas-de-precios-con-vigencia-y-escalas-por-cantidad-gate-v-4).
 - **Una empresa no podía tener dos variantes sin código de barras.** `0003` declaró `UNIQUE NULLS NOT DISTINCT (tenant_id, barcode)` sobre una columna **opcional**: con `NULLS NOT DISTINCT`, NULL cuenta como un valor y la segunda variante sin EAN era rechazada — mientras el índice parcial `idx_variants_barcode ... WHERE barcode IS NOT NULL` de la línea siguiente expresaba la intención contraria. Corregido en `0024` con `UNIQUE (tenant_id, barcode)` a secas. Es una relajación: admite filas antes rechazadas y no invalida ninguna existente.
 - **La cotización con validez no existía, y era el último documento de E6.** La migración `0025` (ADR `0006`) agrega `billing.quotes` + `quote_items` con ciclo `draft → issued → accepted`, `add_quote_item()` que resuelve el precio desde la lista, y `accept_quote()` que **rechaza una oferta vencida** exigiendo reconfirmarla. El vencimiento se deriva (`v_quotes.effective_status`) en vez de almacenarse, y las dos negaciones que la definen se verifican: no emite movimientos de stock —ni una reserva— ni genera asiento. El gate V-1 se mide en `tests/sales/run.mjs`. Con esto **E6 queda completo**: V-1, V-2, V-3 y V-4 medidos. Ver [§3.13](#313-la-cotización-una-oferta-que-vence-y-no-compromete-nada-gate-v-1).
-- **Dos jobs del CI no podían pasar nunca, y un job rojo esconde los otros diez.** El `tsconfig.json` de la raíz declaraba `include: []` **y** `files: []`, así que `npx tsc --noEmit` —el paso que el job `typecheck` corre en la raíz— abortaba con TS18002 **antes de compilar un archivo**: fallaba siempre, sin haber mirado una línea. El job `rls-lint` fallaba por otra vía: el lint escribía en stdout el aviso del paginador, la etiqueta de comando `CREATE VIEW` y una de sus dos líneas de recordatorio, y el filtro del CI no las descartaba, así que `OUT` nunca quedaba vacío. Con los dos jobs en rojo, las ~950 verificaciones de las suites corrían y su resultado se perdía detrás de un pipeline que no decía nada del código. Corregido en `477e89e`: el `include` raíz cubre todos los workspaces, el lint manda sus recordatorios a stderr (`\warn`) y suprime las etiquetas de comando (`\set QUIET 1`), y el paso del CI dejó de tragarse los errores de `psql` con un `|| true` —que convertía un fallo de conexión en un verde—. Los **once** jobs quedaron verificados localmente.
+- **Dos jobs del CI no podían pasar nunca, y un job rojo esconde los otros diez.** El `tsconfig.json` de la raíz declaraba `include: []` **y** `files: []`, así que `npx tsc --noEmit` —el paso que el job `typecheck` corre en la raíz— abortaba con TS18002 **antes de compilar un archivo**: fallaba siempre, sin haber mirado una línea. El job `rls-lint` fallaba por otra vía: el lint escribía en stdout el aviso del paginador, la etiqueta de comando `CREATE VIEW` y una de sus dos líneas de recordatorio, y el filtro del CI no las descartaba, así que `OUT` nunca quedaba vacío. Con los dos jobs en rojo, las ~950 verificaciones de las suites corrían y su resultado se perdía detrás de un pipeline que no decía nada del código. Corregido en `477e89e`: el `include` raíz pasó a cubrir todos los workspaces, el lint manda sus recordatorios a stderr (`\warn`) y suprime las etiquetas de comando (`\set QUIET 1`), y el paso del CI dejó de tragarse los errores de `psql` con un `|| true` —que convertía un fallo de conexión en un verde—. Los **once** jobs quedaron verificados localmente. **Ese diseño del `tsconfig` raíz duró hasta la F1 del frontend**: cubría el TypeScript que resuelve para Node, y una aplicación web necesita JSX, tipos del DOM y resolución de empaquetador. En vez de exceptuar workspaces con un `exclude` —donde el olvido vuelve a ser silencioso—, el `tsconfig` raíz pasó a ser el índice de los cuatro proyectos y la cobertura la **afirma** `tools/check-workspace-typecheck.mjs`: un workspace que no declara su `typecheck` rompe el build con el mensaje que dice qué agregar.
+- **El sistema de diseño y la arquitectura de ventanas del frontend.** `packages/tokens` deriva las tres escalas de doce pasos de los tres colores indicados —con el paso del ancla exacto, no interpolado— y **mide** el contraste de los 38 pares que la interfaz usa, en los dos temas. `apps/web` tiene las **catorce ventanas** navegables, cada una con su ruta, su permiso, su grupo y sus gráficos declarados en un único mapa (`src/rutas.ts`) del que salen el menú, las guardas y los tests. Dos puertas nuevas lo protegen: `check-token-literals.mjs` rompe el build ante un color escrito a mano, y la suite del mapa rompe si una ventana del menú no tiene su página. Ver [`PLAN-FRONTEND-PRODUCCION.md`](docs/PLAN-FRONTEND-PRODUCCION.md) §3 y §4.
 
 ---
 

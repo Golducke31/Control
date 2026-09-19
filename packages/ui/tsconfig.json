@@ -1,0 +1,36 @@
+{
+  // ===========================================================================
+  // packages/ui · configuración propia
+  // ===========================================================================
+  // Este paquete NO lo ejecuta Node: lo empaqueta Next.js. Por eso resuelve sin
+  // extensión —a diferencia de `@control/tokens`, que Node ejecuta directamente y
+  // por eso escribe `.ts` en sus imports relativos—.
+  //
+  // Conserva `erasableSyntaxOnly` igual, aunque no haga falta para ejecutar: deja
+  // fuera `enum` y `namespace` por coherencia con el resto del monorepo, y evita
+  // que dos paquetes del mismo sistema acepten sintaxis distinta.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "types": [],
+
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "isolatedModules": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules"]
+}
