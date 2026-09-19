@@ -9,7 +9,7 @@
 - [`PLAN-ERP-MULTIEMPRESA.md`](PLAN-ERP-MULTIEMPRESA.md) — brechas funcionales y fases E0–E9. **Este plan se ejecuta en paralelo a E7**, no lo reemplaza.
 - `prototype/index.html` — prototipo de diseño que este plan reemplaza.
 
-> **Estado de ejecución.** La fase **F1 · Fundaciones** está implementada y verificada: `packages/tokens` (escalas derivadas, generador y suite de contraste), `packages/ui`, `apps/web` con la carcasa y las catorce ventanas navegables, los dos lints nuevos y el job `web` del CI. Lo que sigue es **F2 · Identidad y acceso**.
+> **Estado de ejecución.** Las fases **F1 · Fundaciones** y **F2 · Identidad y acceso** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. Lo que sigue es **F3 · Sistema de datos**.
 >
 > Tres ajustes respecto de lo planeado, decididos al implementar y documentados donde corresponden:
 > 1. `packages/contracts` y `packages/graficos` se crean en **F3** y **F4**, con su primer consumidor real, no en F1: un paquete sin consumidor es un lastre que nadie mantiene.

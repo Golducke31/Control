@@ -1,18 +1,15 @@
 /**
  * Empresas de demostración.
  *
- * **Esto es un marcador de posición de la fase F1.** En F2 lo reemplaza la sesión
- * real: el servidor resuelve la empresa desde el `slug` de la URL, verifica la
- * membresía del usuario y entrega sus permisos. El cliente nunca decide a qué empresa
- * entra.
+ * El catálogo de empresas que el servidor resuelve desde el `slug`. En F2 la autorización
+ * es **por usuario**: cada empresa habilita todos los módulos (`permisos` = todos los
+ * conocidos) y es la **membresía** del usuario —definida en `sesion/directorio.ts`— la que
+ * acota qué ve. La bandera `logistics.enabled` sigue siendo el mecanismo de
+ * feature-flag por empresa: donde está apagada, la ventana de logística no existe.
  *
- * Mientras tanto, estos datos permiten que la carcasa navegue de verdad y —lo que
- * importa— que el filtrado por permisos y por banderas de funcionalidad sea
- * **observable**: cambiar de empresa cambia el menú, y eso se puede ver.
- *
- * La forma de estos objetos es la que va a tener la respuesta de `GET /empresas/:slug`
- * (ver el anexo B del plan de frontend), así que F2 no cambia los componentes: cambia
- * de dónde vienen los datos.
+ * La forma de `Empresa` es la de la respuesta de `GET /empresas/:slug` (anexo B del plan de
+ * frontend), así que cuando llegue el backend los componentes no cambian: cambia de dónde se
+ * leen los datos.
  */
 
 import { PERMISOS_PENDIENTES, PERMISOS_SEMBRADOS } from './rutas.ts'
@@ -23,20 +20,20 @@ export interface Empresa {
   iniciales: string
   descripcion: string
   rol: string
-  /** Los permisos que el usuario tiene en esta empresa. */
+  /** Permisos que la empresa habilita. Quien no los tenga por membresía no los ve. */
   permisos: readonly string[]
   /** El contenido de `tenants.features`. */
   funcionalidades: Readonly<Record<string, boolean>>
 }
 
 /**
- * Todos los permisos que el mapa conoce.
+ * Todos los permisos que el mapa conoce. Las empresas de demo los habilitan todos; el
+ * recorte real es por membresía de usuario (`sesion/directorio.ts`).
  *
- * En el sistema real, el rol `owner` tiene los 33 sembrados y la migración `0026`
- * agrega los 18 pendientes. Acá se unen para que la demostración muestre las catorce
- * ventanas, que es el punto de F1.
+ * En el sistema real, el rol `owner` tiene los 33 sembrados y la migración `0026` agrega
+ * los 18 pendientes; la migración los siembra y los asigna a los roles de sistema.
  */
-const TODOS_LOS_PERMISOS = [...PERMISOS_SEMBRADOS, ...PERMISOS_PENDIENTES]
+export const TODOS_LOS_PERMISOS = [...PERMISOS_SEMBRADOS, ...PERMISOS_PENDIENTES]
 
 export const EMPRESAS: readonly Empresa[] = [
   {
@@ -53,10 +50,8 @@ export const EMPRESAS: readonly Empresa[] = [
     nombre: 'Pampa Logística',
     iniciales: 'PL',
     descripcion: 'Transporte · 14 unidades',
-    rol: 'Encargado de depósito',
-    // El menú de esta empresa es corto a propósito: sirve para ver que el filtrado
-    // por permisos funciona y no es una lista estática.
-    permisos: ['inventory.read', 'inventory.adjust', 'inventory.transfer', 'inventory.warehouses', 'catalog.read', 'logistics.read'],
+    rol: 'Propietario',
+    permisos: TODOS_LOS_PERMISOS,
     funcionalidades: { 'logistics.enabled': true },
   },
   {
@@ -64,10 +59,10 @@ export const EMPRESAS: readonly Empresa[] = [
     nombre: 'Nórdico Retail',
     iniciales: 'NR',
     descripcion: 'Retail · 1 salón',
-    rol: 'Administrador',
-    // Sin logística: la ventana no existe para esta empresa, y por eso tampoco aparece
-    // en el menú ni se puede alcanzar por URL (regla A4).
-    permisos: TODOS_LOS_PERMISOS.filter((p) => !p.startsWith('logistics.')),
+    rol: 'Propietario',
+    // Sin logística: la ventana no existe para esta empresa (bandera apagada), y por eso
+    // tampoco aparece en el menú ni se puede alcanzar por URL (regla A4).
+    permisos: TODOS_LOS_PERMISOS,
     funcionalidades: { 'logistics.enabled': false },
   },
 ]

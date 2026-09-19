@@ -1,14 +1,20 @@
 import { redirect } from 'next/navigation'
 
-import { EMPRESA_POR_DEFECTO } from '@/empresa'
+import { empresaPorDefecto, sesionActual } from '@/sesion'
 
 /**
  * La raíz no es una pantalla: es una decisión.
  *
- * En F2 resuelve a la empresa de la sesión —o al ingreso si no hay sesión—. Hoy lleva a
- * la empresa de demostración, para que abrir la aplicación lleve a algún lado en vez de
- * a una página de bienvenida que no aporta nada.
+ * Resuelve la sesión y deriva: sin sesión → ingreso; con sesión y al menos una empresa →
+ * su empresa por defecto; con sesión pero sin empresas (p. ej. un usuario de plataforma) →
+ * el selector de empresa, donde puede impersonar. El cliente nunca elige a qué empresa ir.
  */
-export default function Inicio() {
-  redirect(`/e/${EMPRESA_POR_DEFECTO}/panel`)
+export default async function Inicio() {
+  const sesion = await sesionActual()
+  if (sesion === null) redirect('/ingresar')
+
+  const slug = empresaPorDefecto(sesion.sub)
+  if (slug === null) redirect('/empresas')
+
+  redirect(`/e/${slug}/panel`)
 }
