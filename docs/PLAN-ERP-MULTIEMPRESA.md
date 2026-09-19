@@ -24,7 +24,7 @@
 
 > **Estado de ejecución (E6 cerrada).** Las fases **E0 a E6** de §7 ya están implementadas y verificadas: **E0** red de seguridad (manifiestos reales, tests unitarios y typecheck efectivo en CI), **E1** núcleo contable (`0012`), **E2** asientos automáticos (`0013`), **E3** compras y CxP (`0014`), **E4** cobros y tesorería (`0015`, `0016`), **E5** fiscal avanzado (`0017`–`0020`) y **E6** documentos de venta — **cotización** (`0025`), **remito** (`0021`), **devolución de cliente** (`0022`) y **listas de precios con vigencia y escalas** (`0023`), todas por ADR `0006`.
 >
-> El diagnóstico de §3–§5 es el **relevamiento original** (18/09, commit `ae08fbc`). Sus afirmaciones de "ausente" para contabilidad, compras, tesorería y fiscal, y de "falta remito" en ventas, ya están superadas por esas migraciones; se conservan como registro del punto de partida. Las filas de §3.1 que siguen marcadas como ausentes/parciales deben leerse contra ese estado original.
+> El diagnóstico de §3.1 y §4–§5 es el **relevamiento original** (18/09, commit `ae08fbc`). Sus afirmaciones de "ausente" para contabilidad, compras, tesorería y fiscal, y de "falta remito" en ventas, ya están superadas por esas migraciones; se conservan como registro del punto de partida. Las filas de §3.1 que siguen marcadas como ausentes/parciales deben leerse contra ese estado original. **§3.3 es la excepción**: describe la base y no el diagnóstico, así que se mantiene al día con cada fase cerrada.
 >
 > **E6 no tiene pendientes.** Los cuatro gates medibles están cerrados y medidos contra un motor real: **V-1** (cotización que vence y exige reconfirmar), **V-2** (remito facturado en partes sin duplicar), **V-3** (devolución que revierte stock y acredita) y **V-4** (precio por lista con vigencia y escala por cantidad). La siguiente fase del plan es **E7 (Recursos humanos)**, que §7.3 declara el módulo de mayor riesgo y mayor volumen de cálculo.
 
@@ -142,18 +142,22 @@ Sería un error tratar el proyecto como si hubiera que empezar de nuevo. Estos a
 
 ### 3.3 Estado técnico de la base
 
+> **Mantenida al día.** A diferencia de §3.1 y §4–§5 —que son el relevamiento original del
+> 18/09 y se conservan como registro del punto de partida—, esta tabla se actualiza con
+> cada fase cerrada, porque describe la base, no el diagnóstico.
+
 | Dimensión | Estado | Comentario |
 |---|---|---|
-| Migraciones | 11/11 aplicadas y verificadas | PG 16.15 local; cadena reproducible desde cero |
-| Aislamiento | 308 aserciones en verde | Incluye prueba negativa que verifica que la guardia aborta |
-| Lint de cobertura RLS | 0 violaciones | `lint_rls_coverage.sql` |
-| Tablas con `tenant_id` | ~30 cubiertas | Descubiertas desde `pg_class`, no desde lista manual |
-| Jobs | 5 definidos, ejecutados en vivo | Ledger con `is_overdue`, `is_running` |
-| Typecheck | Limpio en `apps/api/src/jobs/**` | `report.service.ts` tiene errores de sintaxis preexistentes (línea 489) que hay que resolver antes de que el typecheck global corra en CI |
-| Suite de tests | Sólo aislamiento | No hay tests unitarios ni de integración por módulo |
-| Frontend de producción | No existe | El prototipo (`prototype/index.html`, 2.447 líneas) valida diseño; no hay implementación Next.js |
+| Migraciones | **25** aplicadas y verificadas | PG 16.15 local; la cadena se recrea desde cero en cada corrida del CI |
+| Aislamiento | **588** aserciones en verde | Incluye una prueba negativa que verifica que la guardia aborta |
+| Lint de cobertura RLS | 0 violaciones | `lint_rls_coverage.sql`, con prueba negativa: una tabla sin RLS se reporta |
+| Tablas con `tenant_id` | **80** cubiertas | Descubiertas desde `pg_class`, no desde una lista manual |
+| Jobs | **9 activos** | Ledger con `is_overdue`, `is_running` |
+| Typecheck | **Limpio en todos los workspaces** | `tsc --noEmit` en la raíz cubre `apps/*` y `packages/*`, y el job del CI lo ejecuta de verdad |
+| Suite de tests | **6 suites contra motor real + 21 tests unitarios** | 948 verificaciones; falta cobertura unitaria por módulo |
+| Frontend de producción | No existe | El prototipo (`prototype/index.html`) valida diseño; no hay implementación Next.js |
 
-**Dos deudas que afectan directamente este plan.** La primera es la ausencia total de tests unitarios y de integración: el plan de producción exige 85–95% de cobertura por módulo y hoy no hay ninguno. La segunda es que `report.service.ts` no compila, lo que impide que el job `typecheck` del CI tenga valor: un pipeline que no puede romperse no protege nada.
+**Qué queda de las dos deudas que este plan señalaba.** La ausencia de tests unitarios y de integración sigue siendo el hueco grande: el plan de producción exige 85–95% de cobertura por módulo, y hoy hay 21 tests unitarios (scheduler y catálogo de jobs) más las 6 suites de invariantes. La segunda —que el job `typecheck` del CI no tenía valor— resultó **peor de lo diagnosticado** y ya está cerrada: el `tsconfig.json` de la raíz no incluía ningún archivo, así que el paso `tsc --noEmit` abortaba con TS18002 **antes de compilar** y el job fallaba siempre. Un pipeline que no puede ponerse verde no es un pipeline sin protección: es uno que esconde la protección que sí existe. Corregido en `477e89e`, junto con el `rls-lint`, que fallaba siempre por otra vía.
 
 ---
 
@@ -575,13 +579,17 @@ Estas decisiones son caras de revertir. Se documentan como ADR **antes** de impl
 
 ### 8.3 Deuda técnica a cerrar antes de escalar
 
-| Deuda | Impacto | Fase |
-|---|---|---|
-| `report.service.ts` no compila (líneas 489 y siguientes) | El job de typecheck del CI no protege | E0 |
-| Sin tests unitarios ni de integración | Todo módulo nuevo agrega riesgo sin red | E0 (permanente) |
-| Frontend de producción inexistente | El prototipo valida diseño, no implementa | E0 en adelante |
-| `apps/api` sin `package.json` ni `tsconfig.json` | El typecheck del CI se saltea silenciosamente | E0 |
-| `git push` bloqueado por el asistente de credenciales | Los commits quedan locales | Independiente del plan |
+| Deuda | Impacto | Fase | Estado |
+|---|---|---|---|
+| `report.service.ts` no compilaba | El job de typecheck del CI no protegía | E0 | **Cerrada** |
+| Sin tests unitarios ni de integración | Todo módulo nuevo agrega riesgo sin red | E0 (permanente) | **Parcial**: 21 tests unitarios y 6 suites de invariantes contra motor real (948 verificaciones); falta cobertura por módulo |
+| Frontend de producción inexistente | El prototipo valida diseño, no implementa | E0 en adelante | **Abierta** |
+| `apps/api` sin `package.json` ni `tsconfig.json` | El typecheck del CI se salteaba en silencio | E0 | **Cerrada** (los manifiestos existen) |
+| `git push` bloqueado por el asistente de credenciales | Los commits quedaban locales | Independiente del plan | **Cerrada** (`scripts/push.sh`) |
+
+**Advertencia sobre las dos primeras filas.** E0 las dio por cerradas y lo estuvieron a medias. El `tsconfig.json` de la raíz quedó con `include: []` **y** `files: []`, así que `npx tsc --noEmit` —el paso que el CI corre en la raíz— abortaba con TS18002 **antes de mirar un archivo**: el job `typecheck` fallaba siempre y con él el pipeline entero, de modo que ningún gate del repositorio quedaba realmente enforced. Lo mismo pasaba con `rls-lint`, cuyo lint escribía en stdout cosas que no eran violaciones (el aviso del paginador, la etiqueta de comando `CREATE VIEW` y una de las dos líneas de recordatorio) y el filtro del CI no descartaba. Los dos se corrigieron al cerrar E6, en el commit `477e89e`, y los once jobs quedaron verificados localmente.
+
+**La lección, que este plan repite en otros lados:** un control que no puede fallar no protege — y uno que no puede **pasar** tampoco, porque se lleva puesto el pipeline y esconde el resultado de los demás. De ahí dos reglas: cada gate nuevo trae su **prueba negativa** (hay cuatro acumuladas en las suites), y cada job del CI debería haberse visto **en rojo** al menos una vez, aunque sea a propósito.
 
 ### 8.4 Extensión del `FiscalDriver` a impuestos
 

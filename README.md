@@ -1226,7 +1226,7 @@ Control/
 │       └── 0001_system_catalog.sql            # Permisos, roles de sistema, plantillas
 ├── apps/
 │   └── api/
-│       ├── package.json / tsconfig*.json      # Manifiestos reales (E0): el typecheck dejó de saltearse
+│       ├── package.json / tsconfig*.json      # Manifiestos reales: el typecheck raíz cubre todos los workspaces
 │       └── src/
 │           ├── jobs/
 │           │   ├── job-runner.ts              # ★ Runner con ledger, modo plataforma, 7 jobs
@@ -1479,6 +1479,7 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **El precio no tenía vigencia ni escalas, y cambiarlo reescribía el pasado.** La migración `0023` (ADR `0006`) agrega vigencia y escalas por cantidad a `app.price_list_items` y `app.price_for()`, con una `EXCLUDE` que impide dos escalas solapadas y un `UNIQUE` parcial que admite una sola lista por defecto. El gate V-4 se mide en `tests/sales/run.mjs`. Ver [§3.12](#312-listas-de-precios-con-vigencia-y-escalas-por-cantidad-gate-v-4).
 - **Una empresa no podía tener dos variantes sin código de barras.** `0003` declaró `UNIQUE NULLS NOT DISTINCT (tenant_id, barcode)` sobre una columna **opcional**: con `NULLS NOT DISTINCT`, NULL cuenta como un valor y la segunda variante sin EAN era rechazada — mientras el índice parcial `idx_variants_barcode ... WHERE barcode IS NOT NULL` de la línea siguiente expresaba la intención contraria. Corregido en `0024` con `UNIQUE (tenant_id, barcode)` a secas. Es una relajación: admite filas antes rechazadas y no invalida ninguna existente.
 - **La cotización con validez no existía, y era el último documento de E6.** La migración `0025` (ADR `0006`) agrega `billing.quotes` + `quote_items` con ciclo `draft → issued → accepted`, `add_quote_item()` que resuelve el precio desde la lista, y `accept_quote()` que **rechaza una oferta vencida** exigiendo reconfirmarla. El vencimiento se deriva (`v_quotes.effective_status`) en vez de almacenarse, y las dos negaciones que la definen se verifican: no emite movimientos de stock —ni una reserva— ni genera asiento. El gate V-1 se mide en `tests/sales/run.mjs`. Con esto **E6 queda completo**: V-1, V-2, V-3 y V-4 medidos. Ver [§3.13](#313-la-cotización-una-oferta-que-vence-y-no-compromete-nada-gate-v-1).
+- **Dos jobs del CI no podían pasar nunca, y un job rojo esconde los otros diez.** El `tsconfig.json` de la raíz declaraba `include: []` **y** `files: []`, así que `npx tsc --noEmit` —el paso que el job `typecheck` corre en la raíz— abortaba con TS18002 **antes de compilar un archivo**: fallaba siempre, sin haber mirado una línea. El job `rls-lint` fallaba por otra vía: el lint escribía en stdout el aviso del paginador, la etiqueta de comando `CREATE VIEW` y una de sus dos líneas de recordatorio, y el filtro del CI no las descartaba, así que `OUT` nunca quedaba vacío. Con los dos jobs en rojo, las ~950 verificaciones de las suites corrían y su resultado se perdía detrás de un pipeline que no decía nada del código. Corregido en `477e89e`: el `include` raíz cubre todos los workspaces, el lint manda sus recordatorios a stderr (`\warn`) y suprime las etiquetas de comando (`\set QUIET 1`), y el paso del CI dejó de tragarse los errores de `psql` con un `|| true` —que convertía un fallo de conexión en un verde—. Los **once** jobs quedaron verificados localmente.
 
 ---
 
