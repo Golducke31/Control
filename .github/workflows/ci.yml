@@ -549,6 +549,74 @@ jobs:
             --verbose
 
   # ---------------------------------------------------------------------------
+  # 3 sexies · Documentos de venta (puerta E6 del plan ERP).
+  #
+  #     Mide el gate, no lo declara. §7.1 lo define como "Remito facturado en
+  #     partes sin duplicar cantidades" (criterio V-2) y §6.2 agrega V-7: el
+  #     CHECK de motor impide qty_invoiced > quantity. La suite recorre el ciclo
+  #     completo —un remito de 100 se factura en 60 + 40, la suma facturada queda
+  #     en 100, facturar de más o repetir es rechazado, y una empresa no factura
+  #     el remito de otra— porque una suite que mirara sólo el acumulador podría
+  #     estar verde mientras el sobre-facturado pasa por otro camino.
+  #
+  #     La migración 0021 introdujo el documento de remito y la garantía de tres
+  #     capas (CHECK + FOR UPDATE + linkage invoice_items.delivery_note_item_id).
+  #     Antes de 0021 no había remito: nada impedía facturar dos veces la misma
+  #     mercadería (el falso verde que este gate cierra).
+  #
+  #     Necesita los DOS DSN: la preparación y la limpieza del escenario corren
+  #     como rol de plataforma (el DELETE de control_app está revocado sobre
+  #     varias tablas del escenario), y la conducción va con el rol de aplicación
+  #     para que RLS se evalúe de verdad —la suite aborta con exit 2 si detecta un
+  #     rol con BYPASSRLS, igual que las demás suites.
+  # ---------------------------------------------------------------------------
+  sales:
+    name: Documentos de venta y puerta (E6)
+    runs-on: ubuntu-latest
+    needs: migrations
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/control_test
+      DATABASE_URL: postgres://app_login:AppL0gin!@localhost:5432/control_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Preparar esquema
+        run: |
+          set -euo pipefail
+          for f in $(ls db/migrations/*.sql | sort); do
+            psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed/0001_system_catalog.sql
+
+      - name: Crear el rol de aplicación
+        run: |
+          set -euo pipefail
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE app_login LOGIN PASSWORD 'AppL0gin!' NOBYPASSRLS IN ROLE control_app;"
+
+      - name: Ejecutar la puerta de E6 (remito facturado en partes sin duplicar)
+        run: |
+          node tests/sales/run.mjs \
+            --dsn "$DATABASE_URL" \
+            --admin-dsn "$ADMIN_DATABASE_URL" \
+            --verbose
+
+  # ---------------------------------------------------------------------------
   # 4 · TypeScript de la API.
   #
   #     Existía un job "probe" que salteaba todo si no encontraba `package.json`
