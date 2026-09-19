@@ -10,7 +10,7 @@ Diseñado para operar en Argentina, con foco en distribuidoras, comercios y oper
 
 1. [Resumen ejecutivo](#1-resumen-ejecutivo)
 2. [Arquitectura del sistema](#2-arquitectura-del-sistema)
-3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls) — incluye las trampas de RLS en tablas particionadas, el remito (§3.10) y la devolución (§3.11)
+3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls) — incluye las trampas de RLS en tablas particionadas, el remito (§3.10), la devolución (§3.11) y las listas de precios con vigencia (§3.12)
 4. [Autenticación y autorización](#4-autenticación-y-autorización)
 5. [Integración AFIP: flujo completo](#5-integración-afip-flujo-completo)
 6. [Stock, depósitos y trazabilidad](#6-stock-depósitos-y-trazabilidad)
@@ -177,6 +177,8 @@ erDiagram
     products ||--o{ product_variants : "se desglosa"
     product_variants ||--o{ stock_levels : "saldo por depósito"
     product_variants ||--o{ stock_movements : "libro mayor"
+    product_variants ||--o{ price_list_items : "se cotiza en"
+    price_lists ||--o{ price_list_items : "contiene escalas"
     warehouses ||--o{ stock_levels : "almacena"
     warehouses ||--o{ stock_transfers : "origen y destino"
 
@@ -237,6 +239,25 @@ erDiagram
         text barcode UK
         numeric list_price
         int min_stock
+    }
+    price_lists {
+        uuid id PK
+        uuid tenant_id FK
+        text name UK
+        char currency
+        numeric multiplier
+        bool is_default "a lo sumo una por empresa"
+    }
+    price_list_items {
+        uuid id PK
+        uuid tenant_id FK
+        uuid price_list_id FK
+        uuid variant_id FK
+        numeric min_quantity
+        numeric max_quantity "NULL = sin tope"
+        numeric price
+        date valid_from
+        date valid_to "NULL = vigente"
     }
     stock_levels {
         uuid tenant_id PK
@@ -342,7 +363,8 @@ erDiagram
 | `app` | `brands` | Marcas. | Sí |
 | `app` | `products` | Producto padre. | Sí |
 | `app` | `product_variants` | Variante vendible (SKU, EAN, precio). | Sí |
-| `app` | `price_lists` / `price_list_items` | Listas de precios (retail/mayorista). | Sí |
+| `app` | `price_lists` | Listas de precios (retail/mayorista). A lo sumo una por defecto. | Sí |
+| `app` | `price_list_items` | **Escalas de precio con vigencia** por variante y lista (gate V-4). | Sí |
 | `app` | `warehouses` | Depósitos. | Sí |
 | `app` | `stock_levels` | Saldo materializado por variante×depósito. | Sí |
 | `app` | `stock_movements` | **Libro mayor append-only.** | Sí + no-mutate |
@@ -587,7 +609,32 @@ La nota de crédito nace como **borrador** ligada por `related_invoice_id`; la a
 
 **Integración con los módulos anteriores.** La cadena ya estaba preparada y la devolución la activa: el rol contable `sales_returns` → cuenta `4.1.1.03` y las reglas de mapeo de `credit_note` las siembra `0013` (E2); `0019` (E5) define el cómputo del IVA de una nota de crédito como hecho propio y con signo contrario; y `apply_credit_note()` de `0015` (E4) la imputa al saldo. Una nota de crédito en borrador **no** figura en `accounting.v_posting_gaps`; autorizada, sí, y el job la asienta.
 
-**Verificación.** `tests/sales/run.mjs` mide los dos gates contra el motor real —36 verificaciones entre V-2 y V-3—, incluidas las negativas (doble aplicación, exceso de cantidad, devolución sin confirmar, cantidad fraccionaria, factura no autorizada, cross-tenant) y la cadena completa hasta el asiento balanceado y el saldo del cliente. El job `sales` del CI ejecuta las dos puertas en cada push.
+**Verificación.** `tests/sales/run.mjs` mide el gate contra el motor real, incluidas las negativas (doble aplicación, exceso de cantidad, devolución sin confirmar, cantidad fraccionaria, factura no autorizada, cross-tenant) y la cadena completa hasta el asiento balanceado y el saldo del cliente.
+
+### 3.12 Listas de precios con vigencia y escalas por cantidad (gate V-4)
+
+`0003` dejó un precio por variante y por lista, sin vigencia y sin escalas. Dos consecuencias: **cambiar un precio borraba el anterior** —un presupuesto de marzo re-cotizado en junio devolvía el precio de junio, y el número que se le pasó al cliente dejaba de ser reproducible—, y la escala por cantidad no tenía dónde vivir, así que terminaba hardcodeada en la aplicación.
+
+`0023` (ADR [`0006`](docs/adr/0006-documentos-de-venta.md), decisión 4) hace que el precio sea **función de `(lista, vigencia, variante, cantidad)` resuelta por datos**:
+
+| Precedencia | Origen | Cuándo |
+|---|---|---|
+| 1 | `tier` | Una escala de la lista cubre la cantidad **y** la fecha |
+| 2 | `list_multiplier` | `product_variants.list_price × price_lists.multiplier` |
+| 3 | *(sin fila)* | No hay precio configurado |
+
+`app.price_for(empresa, lista, variante, cantidad, fecha)` **recibe la fecha** en lugar de devolver «el precio actual», con la misma forma que `fiscal.rates_on()` de `0017`: un llamador que quiera hoy la pasa explícitamente, y así un documento viejo no se re-cotiza con el precio de hoy. Devuelve 0 o 1 fila; 0 filas es una respuesta legítima y el llamador **no debe inventar un 0** (`list_price NOT NULL DEFAULT 0` es el centinela de «sin cargar», no un precio).
+
+**La vigencia vive en la línea, no en la lista.** Una lista («Mayorista») es una entidad durable cuyo contenido cambia con el tiempo; ponerle vigencia obligaría a crear «Mayorista marzo» y «Mayorista abril» como listas distintas, y `price_lists_unique (tenant_id, name)` lo impide. Ésa es la alternativa que se descartó.
+
+**Dos garantías de motor** hacen que la resolución sea determinista, que es lo que el criterio exige:
+
+- **`EXCLUDE` de solapamiento.** Para una misma (empresa, lista, variante) no puede haber dos escalas que se solapen *a la vez* en cantidad y en fecha. Sin esto, `price_for()` podría devolver dos precios para la misma consulta y el resultado dependería del orden físico — la misma irreproducibilidad que el ADR 0004 prohíbe para las alícuotas.
+- **`UNIQUE` parcial de lista por defecto.** A lo sumo una `is_default` por empresa. Con dos, «la lista por defecto» no tiene respuesta.
+
+Un detalle que la `EXCLUDE` obliga a hacer bien: **un cambio de precio cierra la ventana anterior**. Con `valid_to NULL` la ventana se extiende para siempre y cualquier ventana futura se solapa, así que la `EXCLUDE` la rechaza. Es correcto —así se modela un cambio de precio— y es la clase de error que el motor atrapa en vez de dejar pasar en silencio.
+
+**Verificación.** `tests/sales/run.mjs` mide el gate: los bordes de cada tramo (9 y 10 caen en escalas distintas), la escala sin tope superior, la vigencia (cargar un precio futuro **no** cambia el precio de hoy), la caída al multiplicador, el caso sin precio configurado (0 filas), el rechazo del solapamiento y de la segunda lista por defecto, y el aislamiento entre empresas.
 
 ---
 
@@ -1127,7 +1174,9 @@ Control/
 │   │   ├── 0019_tax_documents.sql             # Comprobantes fiscales propios
 │   │   ├── 0020_fiscal_catalog_fk.sql         # FK al catálogo fiscal
 │   │   ├── 0021_delivery_notes.sql            # ★ Remito: documento propio + facturación parcial
-│   │   └── 0022_customer_returns.sql          # ★ Devolución: revierte stock + nota de crédito
+│   │   ├── 0022_customer_returns.sql          # ★ Devolución: revierte stock + nota de crédito
+│   │   ├── 0023_price_lists_validity_and_tiers.sql # ★ Precio por lista con vigencia y escalas
+│   │   └── 0024_variants_barcode_nullable_unique.sql # Fix: dos variantes sin código de barras
 │   └── seed/
 │       └── 0001_system_catalog.sql            # Permisos, roles de sistema, plantillas
 ├── apps/
@@ -1370,7 +1419,7 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Tests de integración** contra AFIP homologación con un CUIT de prueba.
 - **Frontend de producción.** El prototipo valida el diseño; falta la implementación en Next.js con componentes reutilizables.
 - **Reconciliación de stock.** El job `stock.reconciliation` está implementado en `job-runner.ts` (cron `30 4 * * *`) y **reporta sin autocorregir**: la divergencia es un síntoma y no se puede saber cuál de las dos vistas es la equivocada. Queda pendiente decidir si la diferencia debe generar una alerta además de quedar en el ledger.
-- **Listas de precios con vigencia y escalas por cantidad.** El ADR `0006` decidió el documento (migración `0023`); es lo único que queda pendiente de E6. Hasta entonces, remito, devolución y factura usan el `unit_price` snapshot de la orden o de lo facturado.
+- **Cotización con validez.** Es lo único que queda pendiente de E6: el ADR `0006` la decidió como documento con vencimiento y reconfirmación, pero no tiene migración todavía. Hasta entonces, remito, devolución y factura usan el `unit_price` snapshot de la orden o de lo facturado.
 - **Scheduler de infraestructura.** El ledger y el runner están implementados; falta el disparador externo (Kubernetes CronJob o el servicio gestionado que se elija) que invoque cada job según `JOB_SCHEDULE`. Mientras tanto, los jobs se pueden ejecutar a mano y quedan registrados igual.
 - **Alertas de jobs atrasados.** `ops.v_job_health` expone `is_overdue`, pero falta conectar esa vista al sistema de alertas.
 
@@ -1383,6 +1432,8 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Descubrimiento de esquemas unificado.** La suite y el lint usaban listas de esquemas fijas (`app`, `billing`, `logistics`, `audit`) mientras `assert_rls_coverage()` los descubre desde `pg_namespace`. Un esquema nuevo con datos de inquilino habría quedado sin cubrir por las tres herramientas a la vez. Los tres usan ahora el mismo criterio dinámico.
 - **El remito no existía como documento y se podía facturar dos veces.** La migración `0021` (ADR `0006`) agrega `billing.delivery_notes` + `delivery_note_items` con `qty_invoiced`, y `billing.invoice_delivery_note()` factura en partes sin duplicar ni exceder lo despachado. El gate V-2 de E6 se **mide** en `tests/sales/run.mjs` y corre en el job `sales` del CI. Ver [§3.10](#310-el-remito-y-la-facturación-parcial-gate-v-2).
 - **La devolución de cliente no existía como documento.** La migración `0022` (ADR `0006`) agrega `billing.customer_returns` + `customer_return_items` y `billing.apply_customer_return()`, que revierte el stock con un `return_in` trazable y emite la nota de crédito sin permitir devolver de más ni dos veces. El gate V-3 se mide en `tests/sales/run.mjs`. Ver [§3.11](#311-la-devolución-y-la-nota-de-crédito-gate-v-3).
+- **El precio no tenía vigencia ni escalas, y cambiarlo reescribía el pasado.** La migración `0023` (ADR `0006`) agrega vigencia y escalas por cantidad a `app.price_list_items` y `app.price_for()`, con una `EXCLUDE` que impide dos escalas solapadas y un `UNIQUE` parcial que admite una sola lista por defecto. El gate V-4 se mide en `tests/sales/run.mjs`. Ver [§3.12](#312-listas-de-precios-con-vigencia-y-escalas-por-cantidad-gate-v-4).
+- **Una empresa no podía tener dos variantes sin código de barras.** `0003` declaró `UNIQUE NULLS NOT DISTINCT (tenant_id, barcode)` sobre una columna **opcional**: con `NULLS NOT DISTINCT`, NULL cuenta como un valor y la segunda variante sin EAN era rechazada — mientras el índice parcial `idx_variants_barcode ... WHERE barcode IS NOT NULL` de la línea siguiente expresaba la intención contraria. Corregido en `0024` con `UNIQUE (tenant_id, barcode)` a secas. Es una relajación: admite filas antes rechazadas y no invalida ninguna existente.
 
 ---
 

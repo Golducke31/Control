@@ -84,6 +84,19 @@ const DEV_NET   = 400;
 const DEV_TAX   = 84;
 const DEV_TOTAL = 484;
 
+// --- Escenario de listas de precios (V-4) -------------------------------------
+// `VAR_A` ya existe con `list_price = 100.00`, que es la base del multiplicador.
+const LIST_MAY   = 'd6000000-0000-4000-f600-000000000040'; // multiplicador 0.85 + escalas
+const LIST_RET   = 'd6000000-0000-4000-f600-000000000041'; // multiplicador 1.00, sin escalas
+const LIST_PROMO = 'd6000000-0000-4000-f600-000000000042'; // multiplicador 0.80, sin escalas
+const VAR_ZERO   = 'd6000000-0000-4000-f600-000000000043'; // list_price = 0 → sin precio
+const PRICE_BASE = 100;   // list_price de VAR_A
+const PRICE_T1   = 100;   // escala 1..9
+const PRICE_T2   = 80;    // escala 10..49
+const PRICE_T3   = 70;    // escala 50..∞
+const PRICE_T4   = 120;   // escala 1..9 de la ventana futura
+const PRICE_PROMO = 80;   // 100 × 0.80
+
 let VERBOSE = false;
 let passCount = 0;
 const failures = [];
@@ -232,6 +245,22 @@ function applyReturn(tenantId, returnId, pointOfSale, number) {
     'B'::billing.doc_type,
     ${pointOfSale}::smallint,
     ${number}::bigint);`;
+}
+
+/**
+ * Resolución de precio a una fecha y una cantidad.
+ *
+ * Se proyectan sólo `price` y `source` para que la salida de psql sea una línea
+ * comparable. Salida vacía = 0 filas = «sin precio configurado», que es una respuesta
+ * legítima de `app.price_for()` y no un error.
+ */
+function priceForSql(tenantId, listId, variantId, quantity, dateExpr) {
+  return `SELECT price || '|' || source FROM app.price_for(
+    '${tenantId}'::uuid,
+    '${listId}'::uuid,
+    '${variantId}'::uuid,
+    ${quantity}::numeric,
+    ${dateExpr});`;
 }
 
 function output(raw) {
@@ -760,11 +789,192 @@ SELECT billing.confirm_customer_return('${TENANT_A}'::uuid, '${RET_CROSS}'::uuid
 }
 
 // =============================================================================
+// Gate V-4 · Listas de precios con vigencia y escalas por cantidad
+// =============================================================================
+async function gateV4() {
+  console.log('\n\u25b6 Gate V-4 · Listas de precios con vigencia y escalas por cantidad');
+
+  const prep = await trySql(
+    withTenant(
+      TENANT_A,
+      `
+-- Una variante sin precio cargado: 'list_price' es NOT NULL DEFAULT 0 en 0003, así
+-- que el 0 hace de centinela de «sin configurar» y la resolución no debe inventar
+-- un precio 0.
+INSERT INTO app.product_variants (id, tenant_id, product_id, sku, list_price)
+VALUES ('${VAR_ZERO}', '${TENANT_A}', '${PROD_A}', 'SKU-A-0', 0);
+
+INSERT INTO app.price_lists (id, tenant_id, name, currency, multiplier, is_default)
+VALUES
+  ('${LIST_MAY}',   '${TENANT_A}', 'Mayorista', 'ARS', 0.8500, true),
+  ('${LIST_RET}',   '${TENANT_A}', 'Retail',    'ARS', 1.0000, false),
+  ('${LIST_PROMO}', '${TENANT_A}', 'Promo',     'ARS', 0.8000, false);
+
+-- Tres tramos de cantidad sobre la MISMA ventana de vigencia y un cuarto tramo sobre
+-- una ventana posterior. La constraint EXCLUDE tiene que aceptar los tres primeros
+-- —se solapan en fecha pero no en cantidad— y también el cuarto, que se solapa en
+-- cantidad pero no en fecha. Es la prueba de que la garantía es del rango, no de la
+-- columna.
+--
+-- La ventana vieja CIERRA (valid_to) antes de que empiece la nueva. Es la única forma
+-- correcta de expresar un cambio de precio: con valid_to NULL la ventana se extiende
+-- para siempre y cualquier ventana futura se solaparía —lo detectó la propia EXCLUDE
+-- cuando el escenario se escribió con la ventana vieja abierta—.
+INSERT INTO app.price_list_items
+  (tenant_id, price_list_id, variant_id, price, min_quantity, max_quantity, valid_from, valid_to)
+VALUES
+  ('${TENANT_A}', '${LIST_MAY}', '${VAR_A}', ${PRICE_T1}.00, 1,  9,    CURRENT_DATE, CURRENT_DATE + 364),
+  ('${TENANT_A}', '${LIST_MAY}', '${VAR_A}', ${PRICE_T2}.00, 10, 49,   CURRENT_DATE, CURRENT_DATE + 364),
+  ('${TENANT_A}', '${LIST_MAY}', '${VAR_A}', ${PRICE_T3}.00, 50, NULL, CURRENT_DATE, CURRENT_DATE + 364),
+  ('${TENANT_A}', '${LIST_MAY}', '${VAR_A}', ${PRICE_T4}.00, 1,  9,    CURRENT_DATE + 365, NULL);
+`
+    )
+  );
+  if (!prep.ok) {
+    assert(false, 'V-4 · se pudo preparar el escenario de listas de precios', prep.err);
+    return;
+  }
+
+  // El escenario necesita una SEGUNDA variante sin código de barras. `0003` lo
+  // impedía —`UNIQUE NULLS NOT DISTINCT (tenant_id, barcode)` sobre una columna
+  // opcional— y `0024` lo corrigió. Si la restricción volviera, el INSERT de arriba
+  // fallaría; la aserción explícita lo deja dicho en vez de como efecto colateral.
+  const sinBarcode = num(
+    output(await sql(withTenant(TENANT_A, `SELECT count(*) FROM app.product_variants
+      WHERE tenant_id = '${TENANT_A}' AND barcode IS NULL;`)))
+  );
+  assert(
+    sinBarcode >= 2,
+    'dos variantes sin código de barras coexisten en la misma empresa',
+    `variantes sin barcode=${sinBarcode}`
+  );
+
+  const priceOf = (listId, variantId, quantity, dateExpr, tenant = TENANT_A) =>
+    sql(withTenant(tenant, priceForSql(tenant, listId, variantId, quantity, dateExpr))).then(output);
+
+  // ---------------------------------------------------------------------------
+  // 1) Gana la escala que cubre la cantidad, con los bordes inclusivos
+  // ---------------------------------------------------------------------------
+  let got = await priceOf(LIST_MAY, VAR_A, 1, 'CURRENT_DATE');
+  assert(got === `${PRICE_T1}.00|tier`, `cantidad 1 → escala 1..9 (${PRICE_T1})`, got);
+
+  got = await priceOf(LIST_MAY, VAR_A, 9, 'CURRENT_DATE');
+  assert(got === `${PRICE_T1}.00|tier`, `cantidad 9 → sigue en la escala 1..9 (borde superior inclusivo)`, got);
+
+  got = await priceOf(LIST_MAY, VAR_A, 10, 'CURRENT_DATE');
+  assert(got === `${PRICE_T2}.00|tier`, `cantidad 10 → escala 10..49 (borde inferior inclusivo)`, got);
+
+  got = await priceOf(LIST_MAY, VAR_A, 49, 'CURRENT_DATE');
+  assert(got === `${PRICE_T2}.00|tier`, `cantidad 49 → sigue en la escala 10..49`, got);
+
+  got = await priceOf(LIST_MAY, VAR_A, 50, 'CURRENT_DATE');
+  assert(got === `${PRICE_T3}.00|tier`, `cantidad 50 → escala 50..sin tope`, got);
+
+  got = await priceOf(LIST_MAY, VAR_A, 100000, 'CURRENT_DATE');
+  assert(got === `${PRICE_T3}.00|tier`, `cantidad muy alta → la escala sin tope superior sigue aplicando`, got);
+
+  // ---------------------------------------------------------------------------
+  // 2) La vigencia: la fecha decide qué precio rige, y no reescribe el pasado
+  // ---------------------------------------------------------------------------
+  got = await priceOf(LIST_MAY, VAR_A, 1, 'CURRENT_DATE + 365');
+  assert(got === `${PRICE_T4}.00|tier`, `en la ventana futura rige el precio nuevo (${PRICE_T4})`, got);
+
+  got = await priceOf(LIST_MAY, VAR_A, 1, 'CURRENT_DATE');
+  assert(
+    got === `${PRICE_T1}.00|tier`,
+    `cargar una vigencia futura NO cambia el precio de hoy: la cotización vieja sigue siendo reproducible`,
+    got
+  );
+
+  // ---------------------------------------------------------------------------
+  // 3) Sin escala: el precio de lista por el multiplicador de la lista
+  // ---------------------------------------------------------------------------
+  got = await priceOf(LIST_RET, VAR_A, 1, 'CURRENT_DATE');
+  assert(got === `${PRICE_BASE}.00|list_multiplier`, `sin escalas, multiplicador 1.00 → ${PRICE_BASE}`, got);
+
+  got = await priceOf(LIST_PROMO, VAR_A, 1, 'CURRENT_DATE');
+  assert(
+    got === `${PRICE_PROMO}.00|list_multiplier`,
+    `sin escalas, multiplicador 0.80 → ${PRICE_PROMO} (${PRICE_BASE} × 0,80)`,
+    got
+  );
+
+  // ---------------------------------------------------------------------------
+  // 4) Sin precio configurado: 0 filas, no un 0 inventado
+  // ---------------------------------------------------------------------------
+  got = await priceOf(LIST_RET, VAR_ZERO, 1, 'CURRENT_DATE');
+  assert(got === '', 'una variante con list_price = 0 y sin escalas no devuelve precio (0 filas)', `salida=${JSON.stringify(got)}`);
+
+  got = await priceOf(LIST_RET, VAR_ZERO, 1, 'CURRENT_DATE + 3650');
+  assert(got === '', 'tampoco lo inventa en otra fecha', `salida=${JSON.stringify(got)}`);
+
+  // ---------------------------------------------------------------------------
+  // 5) Determinismo: la resolución devuelve UNA fila, nunca dos
+  // ---------------------------------------------------------------------------
+  const rows = num(
+    output(await sql(withTenant(TENANT_A, `SELECT count(*) FROM app.price_for(
+      '${TENANT_A}'::uuid, '${LIST_MAY}'::uuid, '${VAR_A}'::uuid, 10::numeric, CURRENT_DATE);`)))
+  );
+  assert(rows === 1, 'la resolución devuelve exactamente una fila (la EXCLUDE impide dos escalas vigentes)', `filas=${rows}`);
+
+  // ---------------------------------------------------------------------------
+  // 6) Garantías de motor: solapamiento de escalas y lista por defecto única
+  // ---------------------------------------------------------------------------
+  const overlap = await trySql(
+    withTenant(
+      TENANT_A,
+      `INSERT INTO app.price_list_items
+         (tenant_id, price_list_id, variant_id, price, min_quantity, max_quantity, valid_from, valid_to)
+       VALUES ('${TENANT_A}', '${LIST_MAY}', '${VAR_A}', 90.00, 5, 20, CURRENT_DATE, NULL);`
+    )
+  );
+  assert(
+    !overlap.ok && /pli_no_overlap/.test(String(overlap.err)),
+    'el motor rechaza dos escalas solapadas en cantidad Y fecha (EXCLUDE pli_no_overlap)',
+    overlap.err
+  );
+
+  const dateOverlap = await trySql(
+    withTenant(
+      TENANT_A,
+      `INSERT INTO app.price_list_items
+         (tenant_id, price_list_id, variant_id, price, min_quantity, max_quantity, valid_from, valid_to)
+       VALUES ('${TENANT_A}', '${LIST_MAY}', '${VAR_A}', 130.00, 1, 9, CURRENT_DATE + 180, NULL);`
+    )
+  );
+  assert(
+    !dateOverlap.ok && /pli_no_overlap/.test(String(dateOverlap.err)),
+    'el motor rechaza dos precios para el mismo tramo de cantidad con vigencias solapadas',
+    dateOverlap.err
+  );
+
+  const secondDefault = await trySql(
+    withTenant(
+      TENANT_A,
+      `INSERT INTO app.price_lists (tenant_id, name, currency, multiplier, is_default)
+       VALUES ('${TENANT_A}', 'Otra por defecto', 'ARS', 1.0000, true);`
+    )
+  );
+  assert(
+    !secondDefault.ok && /price_lists_one_default_per_tenant/.test(String(secondDefault.err)),
+    'el motor impide una segunda lista por defecto en la misma empresa',
+    secondDefault.err
+  );
+
+  // ---------------------------------------------------------------------------
+  // 7) Aislamiento: la lista de una empresa no resuelve para otra
+  // ---------------------------------------------------------------------------
+  got = await priceOf(LIST_MAY, VAR_A, 1, 'CURRENT_DATE', TENANT_B);
+  assert(got === '', 'otra empresa no resuelve el precio de una lista ajena (RLS + filtro de tenant)', `salida=${JSON.stringify(got)}`);
+}
+
+// =============================================================================
 async function main() {
   await preflight();
   await setup();
   await gateV2();
   await gateV3();
+  await gateV4();
 
   console.log(`\n${'='.repeat(70)}`);
   if (failures.length === 0) {
@@ -803,6 +1013,9 @@ DELETE FROM accounting.fiscal_years       WHERE tenant_id IN ('${TENANT_A}', '${
 -- falla en cuanto una prueba mueve stock, que es lo que hace el gate V-3.
 DELETE FROM app.stock_movements           WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM app.stock_levels              WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+-- Precios: las escalas referencian la lista y la variante, así que van antes que ambas.
+DELETE FROM app.price_list_items          WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
+DELETE FROM app.price_lists               WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM app.product_variants          WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM app.products                  WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
 DELETE FROM app.warehouses                WHERE tenant_id IN ('${TENANT_A}', '${TENANT_B}');
