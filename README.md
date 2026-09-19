@@ -10,7 +10,7 @@ Diseñado para operar en Argentina, con foco en distribuidoras, comercios y oper
 
 1. [Resumen ejecutivo](#1-resumen-ejecutivo)
 2. [Arquitectura del sistema](#2-arquitectura-del-sistema)
-3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls) — incluye las trampas de RLS en tablas particionadas y el remito (§3.10)
+3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls) — incluye las trampas de RLS en tablas particionadas, el remito (§3.10) y la devolución (§3.11)
 4. [Autenticación y autorización](#4-autenticación-y-autorización)
 5. [Integración AFIP: flujo completo](#5-integración-afip-flujo-completo)
 6. [Stock, depósitos y trazabilidad](#6-stock-depósitos-y-trazabilidad)
@@ -193,6 +193,10 @@ erDiagram
     delivery_note_items ||--o{ invoice_items : "origina"
     delivery_notes }o--o| shipments : "se despacha en (opcional)"
 
+    invoices ||--o{ customer_returns : "es devuelta por"
+    customer_returns ||--o{ customer_return_items : "detalla"
+    customer_returns ||--o| invoices : "genera la nota de crédito"
+
     sales_orders ||--o{ shipments : "despacha"
     customers ||--o{ shipments : "recibe"
     carriers ||--o{ shipments : "transporta"
@@ -284,6 +288,25 @@ erDiagram
         numeric unit_price "snapshot de la orden"
         numeric tax_rate
     }
+    customer_returns {
+        uuid id PK
+        uuid tenant_id FK
+        text number UK
+        uuid customer_id FK
+        uuid invoice_id FK "factura de origen"
+        uuid warehouse_id FK
+        text status "draft|confirmed|applied|cancelled"
+        uuid credit_note_id FK "nota de crédito emitida"
+    }
+    customer_return_items {
+        uuid id PK
+        uuid tenant_id FK
+        uuid customer_return_id FK
+        uuid variant_id FK
+        numeric quantity "cuánto vuelve"
+        numeric unit_price "snapshot de lo facturado"
+        numeric tax_rate
+    }
     shipments {
         uuid id PK
         uuid tenant_id FK
@@ -331,6 +354,9 @@ erDiagram
 | `billing` | `invoice_taxes` | Desglose de IVA por alícuota. | Sí |
 | `billing` | `delivery_notes` | **Remito**: documento propio que autoriza la salida y origina la facturación. | Sí |
 | `billing` | `delivery_note_items` | Líneas del remito con `qty_invoiced` (acumulado facturado, gate V-2). | Sí |
+| `billing` | `customer_returns` | **Devolución**: revierte stock y genera la nota de crédito (gate V-3). | Sí |
+| `billing` | `customer_return_items` | Líneas de la devolución, validadas contra lo facturado por variante. | Sí |
+| `billing` | `credit_applications` | Imputación de notas de crédito al saldo de facturas. | Sí |
 | `billing` | `afip_request_log` | Bitácora forense WSAA/WSFE. | Sí + append-only |
 | `billing` | `afip_outbox` | Cola de reintentos de emisión. | Sí |
 | `billing` | `payments` | Cobranzas. | Sí |
@@ -536,7 +562,32 @@ El estado del remito **deriva** del acumulado (`invoiced` cuando toda línea est
 
 **Lo que el remito todavía no cubre.** El ADR `0006` decidió además la **devolución de cliente** (`billing.customer_returns`, migración `0022`) y las **listas de precios con vigencia y escalas por cantidad** (`0023`). Ninguna de las dos está implementada: hasta entonces el remito y la factura siguen usando el `unit_price` snapshot de la orden, y el camino legado orden→factura (sin remito) convive con remito→factura.
 
-**Verificación.** `tests/sales/run.mjs` mide el gate contra el motor real: un remito de 100 facturado en 60 + 40 queda en 100 sin duplicar, y el sobre-facturado, la re-facturación de lo ya facturado y la facturación cross-tenant son rechazados. El job `sales` del CI ejecuta la puerta en cada push.
+**Verificación.** `tests/sales/run.mjs` mide el gate contra el motor real: un remito de 100 facturado en 60 + 40 queda en 100 sin duplicar, y el sobre-facturado, la re-facturación de lo ya facturado y la facturación cross-tenant son rechazados.
+
+### 3.11 La devolución y la nota de crédito (gate V-3)
+
+`0015` dejó a `billing.invoices` capaz de representar una nota de crédito y a `billing.apply_credit_note()` capaz de imputarla al saldo. Faltaba el **documento que la origina**: la devolución de mercadería. Sin él, el camino real quedaba partido en un ajuste de stock por un lado y una nota de crédito emitida a mano por el otro, sin nada que garantizara que la mercadería devuelta es la que se facturó ni que no se devuelva dos veces.
+
+`billing.customer_returns` + `customer_return_items` (migración `0022`, ADR [`0006`](docs/adr/0006-documentos-de-venta.md), decisión 3) cierran el gate V-3 con el ciclo `draft → confirmed → applied`:
+
+| Paso | Qué hace | Garantía |
+|---|---|---|
+| `confirm_customer_return()` | `draft → confirmed` | Exige al menos una línea. Idempotente sobre una ya confirmada. |
+| `apply_customer_return()` | `confirmed → applied` | Revierte stock, emite la nota de crédito y cierra la devolución |
+
+`apply_customer_return()` es donde vive la garantía, y es de motor:
+
+- **No se devuelve más de lo facturado.** Por cada variante valida contra `invoice_items` de la factura de origen, descontando lo ya devuelto por devoluciones **ya aplicadas** —no las confirmadas: una confirmada que todavía no se aplicó no revirtió nada, y contarla dejaría dos devoluciones incompatibles sin poder aplicarse nunca.
+- **No se devuelve dos veces.** Una devolución aplicada no se vuelve a aplicar, y el estado `applied` exige nota de crédito (`CHECK cr_credit_note_state`): una devolución "hecha" sin comprobante es imposible por construcción.
+- **Stock por el único camino permitido.** Emite un `return_in` por `app.apply_stock_movement()`, trazable a la devolución (`source_type = 'customer_return'`). No pasa costo: `return_in` no recalcula el costo promedio —sólo `purchase_in` lo hace—, así que la valuación vuelve al costo promedio de la empresa y no al precio de venta.
+- **Serialización por factura.** Toma un `pg_advisory_xact_lock` sobre `(empresa, factura)`. No puede usar `SELECT ... FOR UPDATE` sobre la factura: la política `invoices_no_update_authorized` bloquea el `UPDATE` —y `FOR UPDATE` lo exige— justo sobre el único comprobante que se puede devolver, que es el autorizado.
+- **Stock entero.** `stock_levels.on_hand` es `int` y `apply_stock_movement()` recibe `integer`: una cantidad fraccionaria falla explícitamente en vez de truncarse en silencio.
+
+La nota de crédito nace como **borrador** ligada por `related_invoice_id`; la autorización AFIP y la imputación al saldo (`billing.apply_credit_note()`) son pasos posteriores, igual que en el camino remito → factura. Las funciones son **`SECURITY INVOKER`** a propósito —a diferencia de `invoice_delivery_note()`—, para que RLS y el permiso `billing.issue_invoice` sigan vigentes durante la emisión del comprobante.
+
+**Integración con los módulos anteriores.** La cadena ya estaba preparada y la devolución la activa: el rol contable `sales_returns` → cuenta `4.1.1.03` y las reglas de mapeo de `credit_note` las siembra `0013` (E2); `0019` (E5) define el cómputo del IVA de una nota de crédito como hecho propio y con signo contrario; y `apply_credit_note()` de `0015` (E4) la imputa al saldo. Una nota de crédito en borrador **no** figura en `accounting.v_posting_gaps`; autorizada, sí, y el job la asienta.
+
+**Verificación.** `tests/sales/run.mjs` mide los dos gates contra el motor real —36 verificaciones entre V-2 y V-3—, incluidas las negativas (doble aplicación, exceso de cantidad, devolución sin confirmar, cantidad fraccionaria, factura no autorizada, cross-tenant) y la cadena completa hasta el asiento balanceado y el saldo del cliente. El job `sales` del CI ejecuta las dos puertas en cada push.
 
 ---
 
@@ -1075,7 +1126,8 @@ Control/
 │   │   ├── 0018_vat_determination.sql         # Determinación de IVA
 │   │   ├── 0019_tax_documents.sql             # Comprobantes fiscales propios
 │   │   ├── 0020_fiscal_catalog_fk.sql         # FK al catálogo fiscal
-│   │   └── 0021_delivery_notes.sql            # ★ Remito: documento propio + facturación parcial
+│   │   ├── 0021_delivery_notes.sql            # ★ Remito: documento propio + facturación parcial
+│   │   └── 0022_customer_returns.sql          # ★ Devolución: revierte stock + nota de crédito
 │   └── seed/
 │       └── 0001_system_catalog.sql            # Permisos, roles de sistema, plantillas
 ├── apps/
@@ -1109,7 +1161,7 @@ Control/
 │   ├── purchasing/                             # Invariantes de compras y CxP
 │   ├── treasury/                               # Invariantes de cobros y tesorería
 │   ├── fiscal/                                 # Determinación de IVA
-│   └── sales/                                  # ★ Gate E6: remito facturado en partes
+│   └── sales/                                  # ★ Puertas de E6: remito en partes (V-2) y devolución (V-3)
 ├── scripts/
 │   ├── push.sh                                 # Push a GitHub sorteando el helper GUI de Windows
 │   └── verify-isolation.ps1                    # Verificación completa en Windows
@@ -1318,7 +1370,7 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Tests de integración** contra AFIP homologación con un CUIT de prueba.
 - **Frontend de producción.** El prototipo valida el diseño; falta la implementación en Next.js con componentes reutilizables.
 - **Reconciliación de stock.** El job `stock.reconciliation` está implementado en `job-runner.ts` (cron `30 4 * * *`) y **reporta sin autocorregir**: la divergencia es un síntoma y no se puede saber cuál de las dos vistas es la equivocada. Queda pendiente decidir si la diferencia debe generar una alerta además de quedar en el ledger.
-- **Devoluciones de cliente y listas de precios con vigencia.** El ADR `0006` decidió ambos documentos; faltan las migraciones `0022` (`billing.customer_returns`) y `0023` (precios con vigencia y escalas por cantidad). Hasta entonces, remito y factura usan el `unit_price` snapshot de la orden. Ver [§3.10](#310-el-remito-y-la-facturación-parcial-gate-v-2).
+- **Listas de precios con vigencia y escalas por cantidad.** El ADR `0006` decidió el documento (migración `0023`); es lo único que queda pendiente de E6. Hasta entonces, remito, devolución y factura usan el `unit_price` snapshot de la orden o de lo facturado.
 - **Scheduler de infraestructura.** El ledger y el runner están implementados; falta el disparador externo (Kubernetes CronJob o el servicio gestionado que se elija) que invoque cada job según `JOB_SCHEDULE`. Mientras tanto, los jobs se pueden ejecutar a mano y quedan registrados igual.
 - **Alertas de jobs atrasados.** `ops.v_job_health` expone `is_overdue`, pero falta conectar esa vista al sistema de alertas.
 
@@ -1330,6 +1382,7 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **La limpieza del escenario no limpiaba.** `setup()` usaba `SET LOCAL app.platform_admin = 'on'` suelto y borraba `audit.events` con un rol sin privilegios: la política `RESTRICTIVE USING (false)` hacía que el `DELETE` afectara 0 filas **sin lanzar error**. Ahora la preparación va por la conexión administrativa, con el camino validado `app.set_tenant_context(NULL, NULL, true)`, y el escenario se verifica antes de correr las pruebas.
 - **Descubrimiento de esquemas unificado.** La suite y el lint usaban listas de esquemas fijas (`app`, `billing`, `logistics`, `audit`) mientras `assert_rls_coverage()` los descubre desde `pg_namespace`. Un esquema nuevo con datos de inquilino habría quedado sin cubrir por las tres herramientas a la vez. Los tres usan ahora el mismo criterio dinámico.
 - **El remito no existía como documento y se podía facturar dos veces.** La migración `0021` (ADR `0006`) agrega `billing.delivery_notes` + `delivery_note_items` con `qty_invoiced`, y `billing.invoice_delivery_note()` factura en partes sin duplicar ni exceder lo despachado. El gate V-2 de E6 se **mide** en `tests/sales/run.mjs` y corre en el job `sales` del CI. Ver [§3.10](#310-el-remito-y-la-facturación-parcial-gate-v-2).
+- **La devolución de cliente no existía como documento.** La migración `0022` (ADR `0006`) agrega `billing.customer_returns` + `customer_return_items` y `billing.apply_customer_return()`, que revierte el stock con un `return_in` trazable y emite la nota de crédito sin permitir devolver de más ni dos veces. El gate V-3 se mide en `tests/sales/run.mjs`. Ver [§3.11](#311-la-devolución-y-la-nota-de-crédito-gate-v-3).
 
 ---
 
