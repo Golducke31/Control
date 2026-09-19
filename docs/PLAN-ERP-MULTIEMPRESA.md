@@ -3,7 +3,7 @@
 **Documento:** Evaluación de brechas y plan de mejora hacia estándar ERP
 **Versión:** 1.0
 **Fecha:** 18 de septiembre de 2026
-**Estado base:** Commit `ae08fbc` sobre `main`. 11 migraciones aplicadas y verificadas contra PostgreSQL 16.15; 308 aserciones de aislamiento en verde; ledger de tareas y reconciliación de stock operativos.
+**Estado base:** Commit `76c0504` sobre `main` (**E6**). 21 migraciones aplicadas y verificadas contra PostgreSQL 16.15; los invariantes de aislamiento, contabilidad, compras, tesorería, fiscal y la puerta de ventas (E6) corren como jobs de CI.
 **Documento relacionado:** [`PLAN-PRODUCCION.md`](PLAN-PRODUCCION.md) — puesta en producción y escalamiento multinacional.
 
 ---
@@ -19,6 +19,14 @@
 7. [Orden de implementación sugerido](#7-orden-de-implementación-sugerido)
 8. [Riesgos y decisiones irreversibles](#8-riesgos-y-decisiones-irreversibles)
 9. [Anexo · Matriz de brechas consolidada](#anexo--matriz-de-brechas-consolidada)
+
+---
+
+> **Estado de ejecución (actualizado tras E6).** Las fases **E0 a E6** de §7 ya están implementadas y verificadas: **E0** red de seguridad (manifiestos reales, tests unitarios y typecheck efectivo en CI), **E1** núcleo contable (`0012`), **E2** asientos automáticos (`0013`), **E3** compras y CxP (`0014`), **E4** cobros y tesorería (`0015`, `0016`), **E5** fiscal avanzado (`0017`–`0020`) y **E6** documentos de venta — **remito** (`0021`, ADR `0006`).
+>
+> El diagnóstico de §3–§5 es el **relevamiento original** (18/09, commit `ae08fbc`). Sus afirmaciones de "ausente" para contabilidad, compras, tesorería y fiscal, y de "falta remito" en ventas, ya están superadas por esas migraciones; se conservan como registro del punto de partida. Las filas de §3.1 que siguen marcadas como ausentes/parciales deben leerse contra ese estado original.
+>
+> Lo que sigue **realmente pendiente** de E6 es cotización, devolución de cliente (`0022`) y listas de precios con vigencia (`0023`); el remito —el gate V-2— está cerrado y medido.
 
 ---
 
@@ -112,7 +120,7 @@ La evaluación se hizo leyendo el esquema real (`db/migrations/*.sql`), los serv
 | **Tesorería** | **Parcial** | `billing.payments` registra cobros. No hay caja, banco, movimiento de fondos, ni conciliación |
 | **Compras** | **Ausente** | El tipo de movimiento `purchase_in` existe en el enum de stock, pero no hay orden de compra, proveedor ni documento que lo origine. El ingreso por compra se registra por ajuste manual |
 | **Inventario** | **Implementado** | `stock_levels` + `stock_movements` (append-only), 9 tipos de movimiento, `apply_stock_movement()` con costo promedio ponderado, transferencias entre depósitos, `app.v_low_stock`, job `stock.reconciliation` verificado |
-| **Ventas** | **Implementado (núcleo)** | `sales_orders` + `_items`, canales, multi-moneda con `fx_rate`, reserva de stock. Falta cotización, remito y devolución como documentos propios |
+| **Ventas** | **Implementado (núcleo + remito)** | `sales_orders` + `_items`, canales, multi-moneda con `fx_rate`, reserva de stock. **Remito implementado en E6** (`0021`, ADR `0006`): `delivery_notes` + `delivery_note_items` como documento propio, con facturación en partes sin duplicar (gate V-2 medido). Faltan cotización, devolución y listas de precios con vigencia |
 | **Fiscal** | **Implementado (emisión)** | WSAA + WSFE completos, CAE, Facturas A/B/C, notas de crédito, `afip_outbox` idempotente, `afip_request_log` forense. **Falta determinación de impuestos, retenciones y libros de IVA** |
 | **Recursos humanos** | **Ausente** | Cero aparición de empleado, legajo, contrato, novedad o liquidación |
 | **Reportes** | **Parcial** | `report.service.ts` (822 líneas) con exportación XLSX/PDF y motor de temas; 5 vistas SQL de apoyo. No hay jerarquías de reportes, comparativos por período, ni tableros por rol |
@@ -201,11 +209,15 @@ Cada brecha se expresa como **qué falta**, **por qué importa** y **qué la des
 
 ### 4.6 Ventas — completar
 
-**Qué falta.** Cotización con validez; pedido vs. remito vs. factura como documentos separados (hoy la orden se parece a todos); remito con firma de recepción; devoluciones de cliente como documento que revierte stock y genera nota de crédito; listas de precios con vigencia y escalas por cantidad; descuentos por volumen y bonificaciones; cupones y promociones; venta contra entrega; cuenta corriente del cliente en el flujo de venta.
+**Qué falta.** Cotización con validez; devoluciones de cliente como documento que revierte stock y genera nota de crédito; listas de precios con vigencia y escalas por cantidad; descuentos por volumen y bonificaciones; cupones y promociones; venta contra entrega; cuenta corriente del cliente en el flujo de venta.
 
 **Por qué importa.** La brecha no es de capacidad sino de **documentos faltantes**. En una operación real, el remito es un documento que viaja con la mercadería y se firma: no tenerlo obliga a improvisar con la orden de venta.
 
 **Qué la desbloquea.** Nada externo; comparte mecánica con logística, que ya existe (`logistics.shipments` puede originarse en un remito en vez de directamente en una orden).
+
+**Estado tras E6 — el remito ya no falta.** La separación pedido / remito / factura dejó de ser una brecha. La migración `0021` (ADR `0006`) crea `billing.delivery_notes` + `billing.delivery_note_items` como documento propio, y `billing.invoice_delivery_note()` factura un remito en varias partes sin duplicar ni exceder lo despachado. La garantía es de motor en tres capas: `CHECK (qty_invoiced <= quantity)`, validación con la línea bloqueada (`FOR UPDATE`) dentro de la transacción, y `invoice_items.delivery_note_item_id` para la trazabilidad origen→destino. El criterio V-2 (§6.2) se **mide** en `tests/sales/run.mjs` y corre en el job `sales` del CI.
+
+Lo que sigue faltando del módulo, y que E6 dejó decidido pero no implementado: **cotización** con validez, **devolución de cliente** (`billing.customer_returns`, migración `0022`) y **listas de precios con vigencia y escalas** (`0023`). Hasta que existan esas dos últimas, el remito y la factura usan el `unit_price` snapshot de la orden, y el camino legado orden→factura convive con remito→factura.
 
 ### 4.7 Reportes y analítica — parcial
 
@@ -245,7 +257,7 @@ No se priorizó por impacto aislado, sino por **apalancamiento sobre las demás 
 | **M3** | **Compras y cuentas a pagar**: proveedor, OC, recepción, factura de compra, pagos, saldos | **P0** | M4, M5, M7 | Alto | El hueco funcional más grave. Se integra con inventario, que ya existe |
 | **M4** | **Cobros y tesorería**: saldo por cliente, imputación, antigüedad, caja, banco, cheques, conciliación | **P1** | M9 | Alto | Cobrar es operación diaria. Los cheques son obligatorios en el mercado argentino |
 | **M5** | **Fiscal avanzado**: determinación de IVA, retenciones, percepciones, libros digitales, IIBB | **P1** | M9 | Medio | Completa el módulo fiscal y habilita al contador a dejar la planilla |
-| **M6** | **Documentos de venta faltantes**: cotización, remito, devolución, listas con vigencia, escalas | **P1** | M9 | Medio | La operación actual se sostiene; esto elimina improvisación |
+| **M6** | **Documentos de venta faltantes**: cotización, remito, devolución, listas con vigencia, escalas | **P1** | M9 | Medio | La operación actual se sostiene; esto elimina improvisación. **Parcialmente hecho en E6**: el remito (documento propio + facturación parcial) está implementado; faltan cotización, devolución y listas con vigencia |
 | **M7** | **Recursos humanos y liquidación de sueldos** | **P2** | M9 | Muy alto | Módulo completo y con riesgo legal. Requiere validación externa |
 | **M8** | **Reportes y estados**: balance, resultados, márgenes, antigüedad, rotación, flujo proyectado, tableros por rol | **P2** | — | Alto | Depende de todo lo anterior. Es la cara visible del ERP |
 | **M9** | **Consolidación y analítica de plataforma**: métricas agregadas multi-tenant con lectura auditada | **P2** | — | Bajo | Necesario para operar el negocio SaaS, no para el cliente |
@@ -350,7 +362,7 @@ Cada módulo se declara terminado con criterios verificables por alguien distint
 | # | Criterio | Verificación |
 |---|---|---|
 | V-1 | Cotización con validez; vencida, requiere reconfirmación | Test funcional |
-| V-2 | Remito facturado en partes: las cantidades no se duplican | Test de trazabilidad |
+| V-2 | Remito facturado en partes: las cantidades no se duplican | **Medido** en `tests/sales/run.mjs` (job `sales` del CI): 60 + 40 = 100 sin duplicar; sobre-facturado, re-facturación de lo ya facturado y cross-tenant rechazados |
 | V-3 | Devolución revierte stock y genera nota de crédito aplicada al saldo | Test funcional |
 | V-4 | Precio por lista con vigencia y escala por cantidad se resuelve correctamente | Tests de prioridad de precio |
 | V-5 | La orden de venta puede originar el envío logístico | Test de integración |
@@ -453,7 +465,7 @@ La consulta 3 del listado es la misma verificación que el job `stock.reconcilia
 | Preguntas de negocio respondibles sin planilla | 2 | 8 |
 | Hechos económicos trazables al documento | 0% | 100% |
 | Períodos contables con cierre | No existen | 12 meses históricos + cierre automático |
-| Documentos de venta soportados | 2 (orden, factura) | 5 (cotización, pedido, remito, factura, devolución) |
+| Documentos de venta soportados | 3 (orden, remito, factura) | 5 (cotización, pedido, remito, factura, devolución) |
 
 ---
 
@@ -471,7 +483,7 @@ Siete fases. Cada una deja el sistema desplegable y en verde, con la misma regla
 | **E3** | Compras y CxP | Proveedores, OC, recepción parcial, factura de compra, pagos, saldos, antigüedad | E2 | Recepción parcial integrada con stock y costo |
 | **E4** | Cobros y tesorería | Saldo por cliente, imputación, antigüedad, caja, banco, cheques, conciliación | E3 | Saldo de tesorería cuadra con movimientos |
 | **E5** | Fiscal avanzado | IVA determinativo, retenciones, percepciones, libros digitales, IIBB | E4 | Posición de IVA reproducible desde el libro |
-| **E6** | Ventas y documentos | Cotización, remito, devolución, listas con vigencia y escalas | E5 | Remito facturado en partes sin duplicar cantidades |
+| **E6** | Ventas y documentos | Cotización, remito, devolución, listas con vigencia y escalas | E5 | Remito facturado en partes sin duplicar cantidades — **cumplido** en el incremento `0021` (medido en `tests/sales/run.mjs`, job `sales` del CI). Cotización, devolución y listas con vigencia **pendientes** |
 | **E7** | Recursos humanos | Legajo, contratos, novedades, liquidación, cargas sociales, libro de sueldos | E6 | **Liquidación validada por estudio contable externo** |
 | **E8** | Reportes y analítica | Estados, márgenes, rotación, flujo proyectado, tableros por rol | E7 | Todo reporte cuadra con su fuente |
 | **E9** | Plataforma y extensión | Consolidación multi-tenant, evaluación de producción/manufactura | E8 | Métricas agregadas auditadas |
@@ -606,7 +618,7 @@ export interface TaxDriver {
 | Cuentas a cobrar | Parcial | Sin saldo por cliente ni antigüedad | M4 | P1 | E4 |
 | Tesorería | Parcial | Sin caja, banco, cheques ni conciliación | M4 | P1 | E4 |
 | Inventario | Implementado | Costeo y reconciliación resueltos | — | — | — |
-| Ventas | Implementado (núcleo) | Faltan cotización, remito y devolución | M6 | P1 | E6 |
+| Ventas | Implementado (núcleo + remito) | Remito hecho (E6, `0021`); faltan cotización, devolución y listas con vigencia | M6 | P1 | E6 |
 | Fiscal | Parcial | Emite correctamente; no determina impuestos | M5 | P1 | E5 |
 | Recursos humanos | Ausente | Inexistente | M7 | P2 | E7 |
 | Reportes | Parcial | Exporta listados; no emite estados | M8 | P2 | E8 |

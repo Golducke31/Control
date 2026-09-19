@@ -10,7 +10,7 @@ Diseñado para operar en Argentina, con foco en distribuidoras, comercios y oper
 
 1. [Resumen ejecutivo](#1-resumen-ejecutivo)
 2. [Arquitectura del sistema](#2-arquitectura-del-sistema)
-3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls) — incluye las trampas de RLS en tablas particionadas
+3. [Modelo de datos y aislamiento RLS](#3-modelo-de-datos-y-aislamiento-rls) — incluye las trampas de RLS en tablas particionadas y el remito (§3.10)
 4. [Autenticación y autorización](#4-autenticación-y-autorización)
 5. [Integración AFIP: flujo completo](#5-integración-afip-flujo-completo)
 6. [Stock, depósitos y trazabilidad](#6-stock-depósitos-y-trazabilidad)
@@ -187,6 +187,12 @@ erDiagram
     invoices ||--o{ invoice_taxes : "desglosa IVA"
     invoices ||--o{ payments : "cobra"
 
+    sales_orders ||--o{ delivery_notes : "autoriza salida (remito)"
+    delivery_notes ||--o{ delivery_note_items : "detalla"
+    delivery_notes ||--o{ invoices : "factura en partes"
+    delivery_note_items ||--o{ invoice_items : "origina"
+    delivery_notes }o--o| shipments : "se despacha en (opcional)"
+
     sales_orders ||--o{ shipments : "despacha"
     customers ||--o{ shipments : "recibe"
     carriers ||--o{ shipments : "transporta"
@@ -254,8 +260,29 @@ erDiagram
         bigint number
         text cae "14 dígitos"
         enum result
+        uuid delivery_note_id FK "origen si viene de remito"
         text idempotency_key UK
         text pdf_url
+    }
+    delivery_notes {
+        uuid id PK
+        uuid tenant_id FK
+        text number UK
+        uuid order_id FK
+        uuid customer_id FK
+        uuid shipment_id FK "despacho operativo, opcional"
+        text status "draft|issued|partially_invoiced|invoiced|cancelled"
+        date issue_date
+    }
+    delivery_note_items {
+        uuid id PK
+        uuid tenant_id FK
+        uuid delivery_note_id FK
+        uuid variant_id FK
+        numeric quantity "despachado en el remito"
+        numeric qty_invoiced "acumulado facturado (gate V-2)"
+        numeric unit_price "snapshot de la orden"
+        numeric tax_rate
     }
     shipments {
         uuid id PK
@@ -299,9 +326,11 @@ erDiagram
 | `app` | `stock_transfers` / `_items` | Transferencias entre depósitos. | Sí |
 | `billing` | `afip_credentials` | CRT/KEY cifrados, TA cacheado. | Sí + permiso estricto |
 | `billing` | `sales_orders` / `_items` | Órdenes de venta. | Sí |
-| `billing` | `invoices` | Comprobantes AFIP. **Inmutable tras CAE.** | Sí + no-mutate |
-| `billing` | `invoice_items` | Líneas (snapshot fiscal). | Sí |
+| `billing` | `invoices` | Comprobantes AFIP. **Inmutable tras CAE.** `delivery_note_id` liga la factura a su remito de origen. | Sí + no-mutate |
+| `billing` | `invoice_items` | Líneas (snapshot fiscal). `delivery_note_item_id` da trazabilidad a la línea de remito. | Sí |
 | `billing` | `invoice_taxes` | Desglose de IVA por alícuota. | Sí |
+| `billing` | `delivery_notes` | **Remito**: documento propio que autoriza la salida y origina la facturación. | Sí |
+| `billing` | `delivery_note_items` | Líneas del remito con `qty_invoiced` (acumulado facturado, gate V-2). | Sí |
 | `billing` | `afip_request_log` | Bitácora forense WSAA/WSFE. | Sí + append-only |
 | `billing` | `afip_outbox` | Cola de reintentos de emisión. | Sí |
 | `billing` | `payments` | Cobranzas. | Sí |
@@ -490,6 +519,24 @@ SELECT app.apply_stock_movement(
 ```
 
 Actualiza el saldo materializado con `ON CONFLICT DO UPDATE` (que toma un lock de fila) y escribe el libro mayor **en la misma transacción**. Los ajustes negativos que dejarían `on_hand < 0` son rechazados por el `CHECK` de `stock_levels`. El costo promedio se recalcula con la fórmula de costo promedio ponderado cuando el movimiento es `purchase_in`.
+
+### 3.10 El remito y la facturación parcial (gate V-2)
+
+Hasta E6 una orden de venta se parecía a todos los documentos, y el papel del remito lo ocupaba `logistics.shipments`: un despacho operativo con tracking y POD, pero **sin número propio y sin ser el origen de la facturación**. El defecto concreto era que nada impedía facturar dos veces la misma mercadería — una factura de 60 y otra de 60 sobre un remito de 100 quedaban en el sistema como si fueran legítimas.
+
+`billing.delivery_notes` + `billing.delivery_note_items` (migración `0021`, ADR [`0006`](docs/adr/0006-documentos-de-venta.md)) cierran el gate de E6 —*"remito facturado en partes sin duplicar cantidades"*— con el mismo criterio que el resto del proyecto: **la garantía va en el motor, no en quien llama.**
+
+| Capa | Mecanismo | Qué garantiza |
+|---|---|---|
+| **a** | `CHECK (qty_invoiced <= quantity)` en `delivery_note_items` | El motor rechaza el sobre-facturado aunque la aplicación lo pida |
+| **b** | `billing.invoice_delivery_note(...)` valida e incrementa `qty_invoiced` **con la línea bloqueada (`FOR UPDATE`)** en la misma transacción | Dos facturaciones concurrentes de la misma línea no pueden sumar más que lo despachado |
+| **c** | `billing.invoice_items.delivery_note_item_id` | Trazabilidad origen→destino navegable: de la factura a la línea de remito, del remito a la orden y al POD |
+
+El estado del remito **deriva** del acumulado (`invoiced` cuando toda línea está completa, `partially_invoiced` en otro caso); no se escribe a mano, igual que `payment_status` en `0015`. La función crea la factura como **borrador**: la autorización AFIP es un paso aparte, con su propio correlativo.
+
+**Lo que el remito todavía no cubre.** El ADR `0006` decidió además la **devolución de cliente** (`billing.customer_returns`, migración `0022`) y las **listas de precios con vigencia y escalas por cantidad** (`0023`). Ninguna de las dos está implementada: hasta entonces el remito y la factura siguen usando el `unit_price` snapshot de la orden, y el camino legado orden→factura (sin remito) convive con remito→factura.
+
+**Verificación.** `tests/sales/run.mjs` mide el gate contra el motor real: un remito de 100 facturado en 60 + 40 queda en 100 sin duplicar, y el sobre-facturado, la re-facturación de lo ya facturado y la facturación cross-tenant son rechazados. El job `sales` del CI ejecuta la puerta en cada push.
 
 ---
 
@@ -1005,7 +1052,7 @@ Control/
 ├── README.md
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                                # Migraciones, lint RLS, aislamiento, secretos
+│       └── ci.yml                                # 11 jobs: migraciones, lint RLS, aislamiento, contable, compras, tesorería, fiscal, ventas, typecheck, unit, secretos
 ├── db/
 │   ├── migrations/
 │   │   ├── 0001_extensions_and_helpers.sql    # Extensiones, tipos, helpers de sesión
@@ -1018,14 +1065,29 @@ Control/
 │   │   ├── 0008_rls_partition_coverage.sql    # ★ RLS en particiones + aserción de cobertura
 │   │   ├── 0009_partition_maintenance.sql     # Creación de particiones con RLS heredado
 │   │   ├── 0010_job_ledger.sql                # Ledger de tareas programadas
-│   │   └── 0011_job_runner_grants.sql         # Permisos del runner de jobs
+│   │   ├── 0011_job_runner_grants.sql         # Permisos del runner de jobs
+│   │   ├── 0012_accounting_core.sql           # Núcleo contable: plan de cuentas, asientos, períodos
+│   │   ├── 0013_automatic_entries.sql         # Asientos automáticos desde hechos operativos
+│   │   ├── 0014_purchasing_and_payables.sql   # Compras y cuentas por pagar
+│   │   ├── 0015_receivables_and_collections.sql # Cobros, imputaciones, cuentas por cobrar
+│   │   ├── 0016_cash_bank_and_checks.sql      # Caja, banco y cheques
+│   │   ├── 0017_fiscal_foundation.sql         # Vocabulario fiscal neutral, alícuotas con vigencia
+│   │   ├── 0018_vat_determination.sql         # Determinación de IVA
+│   │   ├── 0019_tax_documents.sql             # Comprobantes fiscales propios
+│   │   ├── 0020_fiscal_catalog_fk.sql         # FK al catálogo fiscal
+│   │   └── 0021_delivery_notes.sql            # ★ Remito: documento propio + facturación parcial
 │   └── seed/
 │       └── 0001_system_catalog.sql            # Permisos, roles de sistema, plantillas
 ├── apps/
 │   └── api/
+│       ├── package.json / tsconfig*.json      # Manifiestos reales (E0): el typecheck dejó de saltearse
 │       └── src/
 │           ├── jobs/
-│           │   └── job-runner.ts              # ★ Runner con ledger, modo plataforma
+│           │   ├── job-runner.ts              # ★ Runner con ledger, modo plataforma, 7 jobs
+│           │   ├── scheduler.ts               # Interpretación de cadencias cron
+│           │   ├── worker.ts                  # Arranque del worker
+│           │   ├── scheduler.test.ts          # Tests unitarios del scheduler
+│           │   └── job-catalog.test.ts        # Catálogo de jobs ↔ cadencia declarada
 │           ├── modules/
 │           │   ├── tenancy/
 │           │   │   └── tenant-context.service.ts   # ★ Contexto, middleware, guards
@@ -1041,18 +1103,28 @@ Control/
 │           └── realtime/
 │               └── tracking.service.ts             # WS/SSE, bus por tenant, máquina de estados
 ├── tests/
-│   └── isolation/
-│       ├── run.mjs                             # ★ Suite de aislamiento multi-tenant
-│       └── lint_rls_coverage.sql               # Lint de PR: tabla sin política
+│   ├── _apply_migrations.mjs                   # Aplica la cadena completa sobre base limpia
+│   ├── isolation/                              # ★ Aislamiento multi-tenant (descubre tablas desde pg_class)
+│   ├── accounting/                             # Invariantes contables
+│   ├── purchasing/                             # Invariantes de compras y CxP
+│   ├── treasury/                               # Invariantes de cobros y tesorería
+│   ├── fiscal/                                 # Determinación de IVA
+│   └── sales/                                  # ★ Gate E6: remito facturado en partes
 ├── scripts/
+│   ├── push.sh                                 # Push a GitHub sorteando el helper GUI de Windows
 │   └── verify-isolation.ps1                    # Verificación completa en Windows
 ├── tools/
 │   ├── validate-workflow.mjs                   # Validador estructural del CI
-│   └── check-suite-sql.mjs                     # Valida el SQL embebido en la suite
+│   ├── check-suite-sql.mjs                     # Valida el SQL embebido en las suites
+│   ├── check-migration-order.mjs               # Referencias FK hacia adelante
+│   ├── check-composite-fks.mjs                 # FK compuesta sin UNIQUE / FK simple a tabla con tenant_id
+│   └── check-partitioned-tables.mjs            # PK/UNIQUE en particionadas sin la clave de partición
 ├── docs/
-│   └── PLAN-PRODUCCION.md                      # Plan a producción multinacional
+│   ├── PLAN-PRODUCCION.md                      # Plan a producción multinacional
+│   ├── PLAN-ERP-MULTIEMPRESA.md                # Plan de evolución a ERP multiempresa
+│   └── adr/                                    # ADR 0001–0006 (decisiones irreversibles)
 └── prototype/
-    └── index.html                                  # Dashboard glassmorphism funcional
+    └── index.html                              # Dashboard glassmorphism funcional
 ```
 
 ### Archivos clave
@@ -1245,7 +1317,8 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Definición de rutas HTTP.** Los servicios están implementados con sus dependencias inyectadas; resta el cableado de los handlers de Fastify.
 - **Tests de integración** contra AFIP homologación con un CUIT de prueba.
 - **Frontend de producción.** El prototipo valida el diseño; falta la implementación en Next.js con componentes reutilizables.
-- **Reconciliación de stock.** Se define la estructura del libro mayor; falta el job que detecta y reporta discrepancias entre `stock_levels` y la suma de `stock_movements`. El job está declarado en el ledger (`stock.reconciliation`), resta su implementación.
+- **Reconciliación de stock.** El job `stock.reconciliation` está implementado en `job-runner.ts` (cron `30 4 * * *`) y **reporta sin autocorregir**: la divergencia es un síntoma y no se puede saber cuál de las dos vistas es la equivocada. Queda pendiente decidir si la diferencia debe generar una alerta además de quedar en el ledger.
+- **Devoluciones de cliente y listas de precios con vigencia.** El ADR `0006` decidió ambos documentos; faltan las migraciones `0022` (`billing.customer_returns`) y `0023` (precios con vigencia y escalas por cantidad). Hasta entonces, remito y factura usan el `unit_price` snapshot de la orden. Ver [§3.10](#310-el-remito-y-la-facturación-parcial-gate-v-2).
 - **Scheduler de infraestructura.** El ledger y el runner están implementados; falta el disparador externo (Kubernetes CronJob o el servicio gestionado que se elija) que invoque cada job según `JOB_SCHEDULE`. Mientras tanto, los jobs se pueden ejecutar a mano y quedan registrados igual.
 - **Alertas de jobs atrasados.** `ops.v_job_health` expone `is_overdue`, pero falta conectar esa vista al sistema de alertas.
 
@@ -1256,6 +1329,7 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **La suite de aislamiento no probaba el aislamiento.** Se conectaba con un único DSN y nunca hacía `SET ROLE`: con un rol de superusuario —el caso normal, y el que usaba el propio CI— PostgreSQL ignora RLS aun con `FORCE ROW LEVEL SECURITY`, así que las aserciones de fuga daban falso en ambos sentidos. Ahora la suite exige un rol de aplicación (guardia que aborta con exit 2), recibe una segunda conexión administrativa para preparar el escenario, y el CI ejecuta una **prueba negativa** que verifica que la guardia efectivamente aborte. Ver [§12.4](#124-suite-automatizada-de-aislamiento).
 - **La limpieza del escenario no limpiaba.** `setup()` usaba `SET LOCAL app.platform_admin = 'on'` suelto y borraba `audit.events` con un rol sin privilegios: la política `RESTRICTIVE USING (false)` hacía que el `DELETE` afectara 0 filas **sin lanzar error**. Ahora la preparación va por la conexión administrativa, con el camino validado `app.set_tenant_context(NULL, NULL, true)`, y el escenario se verifica antes de correr las pruebas.
 - **Descubrimiento de esquemas unificado.** La suite y el lint usaban listas de esquemas fijas (`app`, `billing`, `logistics`, `audit`) mientras `assert_rls_coverage()` los descubre desde `pg_namespace`. Un esquema nuevo con datos de inquilino habría quedado sin cubrir por las tres herramientas a la vez. Los tres usan ahora el mismo criterio dinámico.
+- **El remito no existía como documento y se podía facturar dos veces.** La migración `0021` (ADR `0006`) agrega `billing.delivery_notes` + `delivery_note_items` con `qty_invoiced`, y `billing.invoice_delivery_note()` factura en partes sin duplicar ni exceder lo despachado. El gate V-2 de E6 se **mide** en `tests/sales/run.mjs` y corre en el job `sales` del CI. Ver [§3.10](#310-el-remito-y-la-facturación-parcial-gate-v-2).
 
 ---
 
