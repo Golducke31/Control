@@ -485,9 +485,18 @@ jobs:
   #
   #     Corre contra un motor real porque ninguno de los tres se ve leyendo el
   #     archivo: los tres aparecieron al aplicar la migración y ejecutar consultas.
+  #
+  #     A partir de E5 este job TAMBIÉN ejecuta `tests/fiscal/run.mjs`, que es el
+  #     gate MEDIDO de la fase: §7.1 lo define como "posición de IVA reproducible
+  #     desde el libro", y lo mide contra un motor real con constantes calculadas a
+  #     mano (F-1..F-6). La fundación de 0017 y el gate conviven en el mismo job
+  #     porque los dos necesitan el mismo motor y el mismo rol de aplicación; juntos
+  #     cierran la fase —sin el gate medido, la fundación por sí sola no prueba que
+  #     el libro fiscal cuadra con los comprobantes, que era exactamente el falso
+  #     verde de 0018—. Por eso `run.mjs` es el que cuenta para dar E5 por cerrada.
   # ---------------------------------------------------------------------------
   fiscal:
-    name: Fundación fiscal (vocabulario y vigencia)
+    name: Fundación y puerta fiscal (E5)
     runs-on: ubuntu-latest
     needs: migrations
     services:
@@ -531,6 +540,13 @@ jobs:
       - name: Verificar la fundación fiscal
         run: |
           node tests/fiscal/_verify_0017.mjs --dsn "$ADMIN_DATABASE_URL"
+
+      - name: Ejecutar la puerta de E5 (posición de IVA reproducible desde el libro)
+        run: |
+          node tests/fiscal/run.mjs \
+            --dsn "$DATABASE_URL" \
+            --admin-dsn "$ADMIN_DATABASE_URL" \
+            --verbose
 
   # ---------------------------------------------------------------------------
   # 4 · TypeScript de la API.

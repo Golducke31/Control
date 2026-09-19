@@ -291,16 +291,34 @@ async function main() {
   );
 
   // ---------------------------------------------------------------------------
-  console.log('\n▶ 6 · Aislamiento: la FK compuesta impide cruzar empresas');
+  console.log('\n▶ 6 · Aislamiento del catálogo: RLS, no FK compuesta');
   // ---------------------------------------------------------------------------
-  const crossRejected = await rejected(
-    db,
-    `INSERT INTO fiscal.document_taxes
-       (tenant_id, invoice_id, tax_id, rate_code, rate, taxable_base, amount)
-     VALUES ($1, gen_random_uuid(), $2, '21', 0.105, 100, 10.5)`,
-    [tC, taxOwn]
+  // Tras 0020 el catálogo fiscal es COMPARTIDO y la referencia a un impuesto es
+  // una FK SIMPLE (`tax_id` → `fiscal.taxes(id)`), no compuesta. La FK compuesta
+  // se relajó adrede porque una fila de plataforma tiene `tenant_id = NULL` y la
+  // compuesta nunca emparejaría. Lo que ahora garantiza el aislamiento NO es la FK
+  // sino RLS sobre el catálogo: una empresa no debe VER el impuesto propio de otra,
+  // pero SÍ debe ver el de plataforma (es lo que le permite registrar su IVA contra
+  // el parámetro global). Lo medimos con el rol de aplicación, no con el
+  // superusuario, porque RLS sólo se ejercita fuera de `postgres`.
+  const app2 = new pg.Client({
+    connectionString: DSN.replace(/\/\/postgres:([^@]*)@/, '//app_login:AppL0gin%21@'),
+  });
+  await app2.connect();
+  await app2.query(`SELECT app.set_tenant_context($1, NULL, false)`, [tC]);
+
+  const veOtra = await app2.query(
+    `SELECT count(*)::int AS n FROM fiscal.taxes WHERE id = $1`,
+    [taxOwn]
   );
-  check('una empresa no puede referenciar un impuesto de otra', crossRejected);
+  check('una empresa no ve el impuesto propio de otra (RLS)', veOtra.rows[0].n === 0);
+
+  const vePlat = await app2.query(
+    `SELECT count(*)::int AS n FROM fiscal.taxes WHERE code = $1 AND tenant_id IS NULL`,
+    [`iva_${stamp}`]
+  );
+  check('una empresa sí ve el impuesto de plataforma (catálogo compartido)', vePlat.rows[0].n === 1);
+  await app2.end();
 
   // ---------------------------------------------------------------------------
   console.log('\n▶ 7 · Cobertura RLS de las tablas nuevas');
@@ -312,7 +330,27 @@ async function main() {
     WHERE n.nspname = 'fiscal' AND c.relkind = 'r'
     ORDER BY c.relname
   `);
-  check('el esquema fiscal tiene 4 tablas', rls.rowCount === 4, `${rls.rowCount}`);
+  // Las tablas del esquema fiscal esperadas tras 0017+0018+0019. El bucle de
+  // abajo sigue exigiendo RLS + FORCE + política sobre CADA tabla fiscal; esta
+  // aserción garantiza además que ninguna de las introducidas se perdió. Es un
+  // mínimo (>=), así que las fases siguientes pueden agregar tablas sin romperlo.
+  const expectedFiscal = [
+    'taxes',
+    'tax_rates',
+    'withholding_regimes',
+    'document_taxes',
+    'vat_accruals',
+    'tax_documents',
+    'accrual_rules',
+    'document_withholdings',
+  ];
+  const gotFiscal = rls.rows.map((r) => r.relname);
+  const faltanFiscal = expectedFiscal.filter((t) => !gotFiscal.includes(t));
+  check(
+    'el esquema fiscal tiene las 8 tablas esperadas y RLS',
+    faltanFiscal.length === 0 && gotFiscal.length >= expectedFiscal.length,
+    faltanFiscal.length ? `faltan: ${faltanFiscal.join(', ')}` : gotFiscal.join(', ')
+  );
   for (const r of rls.rows) {
     check(
       `${r.relname}: RLS + FORCE + política`,

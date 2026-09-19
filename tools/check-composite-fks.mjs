@@ -214,7 +214,27 @@ for (const m of allCode.matchAll(compositeRe)) {
 // app.tenants y app.users: la primera es el inquilino mismo, la segunda es
 // identidad global sin tenant_id.
 // -----------------------------------------------------------------------------
-const GLOBAL_TABLES = new Set(['app.tenants', 'app.users', 'app.permissions', 'app.roles']);
+// Tablas que, aunque tienen `tenant_id`, son referenciables por FK simple `(id)`
+// porque son catálogos COMPARTIDOS, no recursos de una empresa:
+//
+//   · `app.tenants`, `app.users`, `app.permissions`, `app.roles` — identidad y
+//     autorización globales, por diseño.
+//   · `fiscal.taxes`, `fiscal.withholding_regimes` — catálogo fiscal de plataforma.
+//     Tienen `tenant_id` NULLABLE y NULL = definición de plataforma (el IVA 21% de
+//     AFIP es el mismo para todas las empresas). La migración 0020 relaja las FKs
+//     que apuntan a ellas de compuestas a simples EXACTAMENTE por esto: una FK
+//     `(tenant_id, id)` impediría referenciar la fila de plataforma desde una
+//     empresa y dejaba el módulo fiscal inutilizable. La excepción está documentada
+//     en 0020 y en el ADR 0005. El aislamiento lo garantiza RLS (políticas
+//     `taxes_read` / `withholding_read`), no estas FKs.
+const GLOBAL_TABLES = new Set([
+  'app.tenants',
+  'app.users',
+  'app.permissions',
+  'app.roles',
+  'fiscal.taxes',
+  'fiscal.withholding_regimes',
+]);
 
 const simpleRe = /REFERENCES\s+([\w.]+)\s*\(\s*id\s*\)/gi;
 
