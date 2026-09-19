@@ -121,8 +121,18 @@ jobs:
       - name: Ejecutar lint (falla si hay filas)
         run: |
           set -euo pipefail
-          OUT=$(psql "$DATABASE_URL" -t -A -f tests/isolation/lint_rls_coverage.sql \
-                | grep -v '^$' | grep -v '^Recordatorio' || true)
+          # El script garantiza por contrato que stdout lleva SÓLO violaciones.
+          #
+          # `sed` y no `grep` para descartar las líneas vacías: con `set -e`, un grep
+          # sin coincidencias devuelve 1 y abortaría el paso justo cuando NO hay
+          # defectos, que es el caso que se quiere premiar.
+          #
+          # Sin `|| true` y con `ON_ERROR_STOP=1`: si psql falla, el paso falla. Antes
+          # el `|| true` convertía un error de conexión o de SQL en un `OUT` vacío, es
+          # decir en un verde. Un chequeo que se saltea cuando la herramienta se rompe
+          # no protege nada.
+          OUT=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -t -A -q \
+                -f tests/isolation/lint_rls_coverage.sql | sed '/^[[:space:]]*$/d')
           if [ -n "$OUT" ]; then
             echo "::error::Defectos de cobertura RLS detectados"
             echo "$OUT"

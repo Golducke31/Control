@@ -10,9 +10,29 @@
 --
 -- Uso:
 --   psql "$DATABASE_URL" -f tests/isolation/lint_rls_coverage.sql
+--
+-- CONTRATO DE SALIDA · stdout lleva SÓLO las violaciones, una por línea. Vacío = OK.
+--
+-- POR QUÉ EL CONTRATO IMPORTA TANTO
+--
+-- El CI decide con `[ -n "$OUT" ]` sobre stdout: cualquier línea que no sea una
+-- violación convierte este control en un job que falla SIEMPRE. Y un job que no
+-- puede pasar es tan inútil como uno que no corre, con el agravante de que se lleva
+-- puesto el pipeline entero y esconde el resultado de todos los demás.
+--
+-- Pasaba exactamente eso: el script imprimía en stdout el aviso «Pager usage is off.»
+-- de `\pset pager off`, la etiqueta de comando `CREATE VIEW` de la vista temporal, y
+-- dos líneas de recordatorio de las cuales el filtro del CI descartaba una sola (la
+-- que empieza con «Recordatorio»). Con eso, `OUT` nunca quedaba vacío.
+--
+-- Las tres fugas están cerradas: `\set QUIET 1` suprime las etiquetas de comando, el
+-- `\pset pager off` se quitó —en un script no interactivo el paginador ya está
+-- apagado, así que sólo aportaba el aviso— y los recordatorios van a stderr con
+-- `\warn`, que es donde tienen que estar: informan a la persona, no al chequeo.
 -- =============================================================================
 
-\pset pager off
+-- Suprime las etiquetas de comando (`CREATE VIEW`, `INSERT 0 1`) de stdout.
+\set QUIET 1
 
 -- Los esquemas se descubren, no se enumeran: la versión SQL de la aserción debe
 -- fallar por el mismo motivo que `app.assert_rls_coverage()`. Si acá hubiera una
@@ -114,7 +134,7 @@ SELECT
 FROM violations
 ORDER BY schema_name, table_name, defect;
 
--- Recordatorio del invariante que este lint protege.
-\echo ''
-\echo 'Recordatorio: toda tabla con tenant_id necesita FORCE RLS + politica.'
-\echo 'Las particiones NO heredan las politicas del padre: usar app.apply_partition_rls().'
+-- Recordatorio del invariante que este lint protege. Va a STDERR (`\warn`) y no a
+-- stdout: stdout es la lista de violaciones y el CI la lee como tal.
+\warn Recordatorio: toda tabla con tenant_id necesita FORCE RLS + politica.
+\warn Las particiones NO heredan las politicas del padre: usar app.apply_partition_rls().

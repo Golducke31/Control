@@ -1,4 +1,30 @@
 {
+  // ===========================================================================
+  // Configuración base del monorepo · Control
+  // ===========================================================================
+  // Cubre el TypeScript de TODOS los workspaces (`apps/*`, `packages/*`), así que
+  // un workspace nuevo queda chequeado sin tocar el CI ni este archivo.
+  //
+  // POR QUÉ TIENE UN `include` REAL Y NO ESTÁ VACÍO
+  //
+  // Hasta acá este archivo declaraba `"include": []` y `"files": []`, y el job
+  // `typecheck` del CI corre `npx tsc --noEmit` en la raíz. Con las dos listas
+  // vacías TypeScript aborta con TS18002 («The 'files' list in config file is
+  // empty») ANTES de mirar un solo archivo: el job fallaba siempre y con él el
+  // pipeline entero, así que ningún gate del repositorio quedaba enforced —las
+  // ~950 verificaciones de las suites corrían y su resultado se perdía detrás de
+  // un job rojo que no decía nada del código—.
+  //
+  // El defecto viene de E0, que arregló que el typecheck se SALTEARA en silencio
+  // (no había `package.json` en la raíz) y lo dejó fallando siempre. Un chequeo
+  // que no puede pasar es tan inútil como uno que no corre, y más difícil de ver.
+  //
+  // RELACIÓN CON `apps/api/tsconfig.json`
+  //
+  // Ése declara su propio `include` y es MÁS estricto (`noUncheckedIndexedAccess`,
+  // `exactOptionalPropertyTypes`, `noFallthroughCasesInSwitch`, `isolatedModules`,
+  // `verbatimModuleSyntax`), así que es el chequeo autoritativo de la API. Éste es
+  // el piso: garantiza que ningún workspace quede sin chequear por olvido.
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],
@@ -11,6 +37,6 @@
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true
   },
-  "include": [],
-  "files": []
+  "include": ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts"],
+  "exclude": ["**/node_modules", "**/dist", "**/dist-test"]
 }
