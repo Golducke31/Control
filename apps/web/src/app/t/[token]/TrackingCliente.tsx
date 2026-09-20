@@ -75,16 +75,3 @@ export function TrackingCliente({ seguimiento }: { seguimiento: TrackingPublico 
     </main>
   )
 }
-
-/** La página de un token inexistente. No revela si el código existe. */
-export function TrackingNoEncontrado({ token }: { token: string }) {
-  return (
-    <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center justify-center gap-3 px-4 py-10 text-center">
-      <h1 className="text-lg font-semibold text-principal">No encontramos ese envío</h1>
-      <p className="text-sm text-secundario">
-        El código <span className="font-mono">{token}</span> no corresponde a ningún envío. Revisá el link que te
-        enviaron.
-      </p>
-    </main>
-  )
-}
