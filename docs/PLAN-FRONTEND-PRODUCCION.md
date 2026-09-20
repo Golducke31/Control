@@ -9,7 +9,7 @@
 - [`PLAN-ERP-MULTIEMPRESA.md`](PLAN-ERP-MULTIEMPRESA.md) — brechas funcionales y fases E0–E9. **Este plan se ejecuta en paralelo a E7**, no lo reemplaza.
 - `prototype/index.html` — prototipo de diseño que este plan reemplaza.
 
-> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso** y **F3 · Sistema de datos** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. Lo que sigue es **F4 · Operación diaria**.
+> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos** y **F4 · Operación diaria** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel** (KPIs del período), **Ventas** (la cadena completa de documentos con las transiciones válidas en la barra de acciones) y **Facturación** (comprobantes fiscales con estado de AFIP y de cobro), más la lógica pura de transiciones de la cadena. Lo que sigue es **F5 · Inventario**.
 >
 > Tres ajustes respecto de lo planeado, decididos al implementar y documentados donde corresponden:
 > 1. `packages/contracts` y `packages/graficos` se crean en **F3** y **F4**, con su primer consumidor real, no en F1: un paquete sin consumidor es un lastre que nadie mantiene.
@@ -906,7 +906,18 @@ Ingreso (Google SSO y credenciales), verificación en dos pasos, recuperación, 
 ### F4 · Operación diaria
 Panel, Ventas (las 15 sub-rutas) y Facturación (las 5). Es la fase que ejercita **la cadena completa de documentos** que se construyó en E6: cotización → pedido → remito → factura → devolución, con las transiciones válidas en la barra de acciones y el estado derivado visible.
 
+**Alcance entregado en esta pasada.** Las tres ventanas raíz cableadas de punta a punta contra el `SimuladoCliente` (Panel con KPIs, Ventas con la cadena y la barra de acciones, Facturación con comprobantes y estado de AFIP/cobro), más la lógica pura de transiciones en `packages/contracts/src/cadenas.ts` con su suite. Las **sub-rutas de detalle** (las 15 de Ventas y las 5 de Facturación: alta/edición de cada documento, impresión, envío por mail, conciliación) quedan como trabajo de seguimiento dentro de F4 — la base operable y las reglas de la puerta ya están, y es lo que el backend necesita para no depender de pantallas de demostración.
+
 **Puerta:** la cadena completa operable contra datos simulados; una cotización vencida no ofrece aceptar; un remito con facturación completa no ofrece facturar.
+
+| Criterio de la puerta | Evidencia | Resultado |
+| --- | --- | --- |
+| La cadena completa operable contra datos simulados | `SimuladoCliente.listarDocumentosVenta` + fixtures con los 5 eslabones; ventana Ventas los lista | ✅ |
+| Una cotización vencida no ofrece aceptar | `accionesDisponibles(cotizacion, hoy)` devuelve `[]` cuando `venceEn < hoy` (`cadenas.test.ts`, PUERTA F4·1) | ✅ |
+| Un remito con facturación completa no ofrece facturar | `accionesDisponibles(remito, hoy)` devuelve `[]` cuando `facturadoCompleto` (`cadenas.test.ts`, PUERTA F4·2) | ✅ |
+| El «hoy» es reproducible, no `now()` oculto | `accionesDisponibles(doc, hoy)` recibe la fecha; la frontera `venceEn == hoy` es aceptable (como `v_quotes`) | ✅ |
+
+**Verificación mecánica.** `npm run verify` en verde; typecheck de 5 workspaces; `node --test` en `packages/contracts` (**21**) y `apps/web` (**49**) en verde; `next build` de `@control/web` exitoso (panel 927 B, ventas 2,26 kB, facturación 2,27 kB).
 
 ### F5 · Inventario
 Catálogo (5 sub-rutas) y Stock (8 sub-rutas), incluidos recuento, transferencia con bloqueo optimista y la ventana de conciliación que muestra el resultado del job.

@@ -3,6 +3,8 @@ import {
   ProductoListadoSchema,
   NivelStockListadoSchema,
   DocumentoVentaListadoSchema,
+  PanelResumenSchema,
+  FacturacionListadoSchema,
   MiembroListadoSchema,
   AuditoriaListadoSchema,
   TareaListadoSchema,
@@ -29,9 +31,9 @@ export interface ContratoVentana {
 }
 
 export const CONTRATOS: Record<string, ContratoVentana> = {
-  panel: { ventanaId: 'panel', endpoint: '/api/v1/panel/resumen', esquema: PendienteSchema, estado: 'pendiente' },
-  ventas: { ventanaId: 'ventas', endpoint: '/api/v1/ventas/documentos', esquema: DocumentoVentaListadoSchema, estado: 'pendiente' },
-  facturacion: { ventanaId: 'facturacion', endpoint: '/api/v1/facturacion/comprobantes', esquema: PendienteSchema, estado: 'pendiente' },
+  panel: { ventanaId: 'panel', endpoint: '/api/v1/panel/resumen', esquema: PanelResumenSchema, estado: 'listo' },
+  ventas: { ventanaId: 'ventas', endpoint: '/api/v1/ventas/documentos', esquema: DocumentoVentaListadoSchema, estado: 'listo' },
+  facturacion: { ventanaId: 'facturacion', endpoint: '/api/v1/facturacion/comprobantes', esquema: FacturacionListadoSchema, estado: 'listo' },
   catalogo: { ventanaId: 'catalogo', endpoint: '/api/v1/catalogo/productos', esquema: ProductoListadoSchema, estado: 'listo' },
   stock: { ventanaId: 'stock', endpoint: '/api/v1/stock/niveles', esquema: NivelStockListadoSchema, estado: 'pendiente' },
   compras: { ventanaId: 'compras', endpoint: '/api/v1/compras/ordenes', esquema: PendienteSchema, estado: 'pendiente' },

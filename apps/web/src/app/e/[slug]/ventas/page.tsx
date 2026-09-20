@@ -1,17 +1,25 @@
+import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { getCliente } from '@/datos/cliente'
+import { VentasCliente } from './VentasCliente'
 
-import { VentanaPendiente } from '@/componentes/VentanaPendiente'
-import { ventanaPorId } from '@/rutas'
+export const metadata: Metadata = { title: 'Ventas' }
 
 /**
- * La ventana se declara en el mapa de rutas, con su permiso, su grupo y sus subrutas.
- * El contenido llega en la fase que el mapa indica; hasta entonces esta página muestra
- * lo que el mapa dice de ella, para que la arquitectura sea verificable a simple vista.
+ * Ventas (F4).
+ *
+ * Server Component: resuelve la primera página de la cadena con el cliente y la
+ * hidrata en React Query como `initialData`. El estado de la vista vive en la URL
+ * (A12); recargar restaura filtros, página y orden.
  */
-const ventana = ventanaPorId('ventas')
+export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const cliente = getCliente()
+  const inicial = await cliente.listarDocumentosVenta({ empresaSlug: slug, pagina: 1, porPagina: 10 })
 
-export const metadata: Metadata = { title: ventana.titulo }
-
-export default function Pagina() {
-  return <VentanaPendiente ventana={ventana} />
+  return (
+    <Suspense>
+      <VentasCliente slug={slug} initialData={inicial} />
+    </Suspense>
+  )
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { SimuladoCliente } from './cliente.ts'
-import { ProductoListadoSchema } from '@control/contracts'
+import { ProductoListadoSchema, DocumentoVentaListadoSchema, FacturacionListadoSchema, PanelResumenSchema } from '@control/contracts'
 
 const cliente = new SimuladoCliente()
 
@@ -50,4 +50,31 @@ test('el orden por precio es estable y direccional', async () => {
   const precios = asc.items.map((i) => i.precio)
   const ordenado = [...precios].sort((a, b) => a - b)
   assert.deepEqual(precios, ordenado, 'precio ascendente')
+})
+
+test('listarDocumentosVenta valida en la frontera y trae la cadena', async () => {
+  const r = await cliente.listarDocumentosVenta({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.deepEqual(DocumentoVentaListadoSchema.parse(r), r)
+  assert.ok(r.items.some((d) => d.tipo === 'cotizacion' && d.venceEn != null), 'la cadena trae cotizaciones con vencimiento')
+  assert.ok(r.items.some((d) => d.tipo === 'remito' && d.facturadoCompleto === true), 'la cadena trae remitos facturados')
+})
+
+test('obtenerPanelResumen refleja la empresa y valida el contrato', async () => {
+  const r = await cliente.obtenerPanelResumen('pampa')
+  assert.deepEqual(PanelResumenSchema.parse(r), r)
+  assert.equal(r.empresa, 'pampa')
+  assert.ok(r.kpis.length > 0)
+})
+
+test('listarComprobantes valida y filtra por texto', async () => {
+  const r = await cliente.listarComprobantes({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.deepEqual(FacturacionListadoSchema.parse(r), r)
+  const filtrado = await cliente.listarComprobantes({
+    empresaSlug: 'andes',
+    texto: 'mayorista',
+    pagina: 1,
+    porPagina: 50,
+  })
+  assert.ok(filtrado.paginacion.total < r.paginacion.total)
+  assert.ok(filtrado.items.every((c) => `${c.numero} ${c.cliente}`.toLowerCase().includes('mayorista')))
 })

@@ -3,6 +3,8 @@ import type {
   NivelStockListado,
   MovimientoStockListado,
   DocumentoVentaListado,
+  PanelResumen,
+  FacturacionListado,
   Orden,
 } from '@control/contracts'
 import {
@@ -10,8 +12,17 @@ import {
   NivelStockListadoSchema,
   MovimientoStockListadoSchema,
   DocumentoVentaListadoSchema,
+  PanelResumenSchema,
+  FacturacionListadoSchema,
 } from '@control/contracts'
-import { productos, niveles, movimientos, documentosVenta } from '@control/contracts/fixtures'
+import {
+  productos,
+  niveles,
+  movimientos,
+  documentosVenta,
+  panelResumen,
+  comprobantes,
+} from '@control/contracts/fixtures'
 
 /** Parámetros comunes de una consulta de lista. */
 export interface ParametrosLista {
@@ -34,6 +45,9 @@ export interface ApiClient {
   listarNiveles(p: ParametrosLista): Promise<NivelStockListado>
   listarMovimientos(p: ParametrosLista): Promise<MovimientoStockListado>
   listarDocumentosVenta(p: ParametrosLista): Promise<DocumentoVentaListado>
+  /** Resumen del panel de operación diaria (objeto único, no una colección). */
+  obtenerPanelResumen(empresaSlug: string): Promise<PanelResumen>
+  listarComprobantes(p: ParametrosLista): Promise<FacturacionListado>
 }
 
 /** Pequeño motor de consulta en memoria sobre los fixtures. */
@@ -147,6 +161,27 @@ export class SimuladoCliente implements ApiClient {
       paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
     })
   }
+
+  async obtenerPanelResumen(empresaSlug: string): Promise<PanelResumen> {
+    return PanelResumenSchema.parse({ ...panelResumen, empresa: empresaSlug })
+  }
+
+  async listarComprobantes(p: ParametrosLista): Promise<FacturacionListado> {
+    const r = consultar(
+      comprobantes,
+      p,
+      (x) => `${x.numero} ${x.cliente} ${x.tipo} ${x.estado}`,
+      (x, campo) => {
+        if (campo === 'numero' || campo === 'cliente' || campo === 'tipo' || campo === 'estado' || campo === 'total' || campo === 'fecha')
+          return x[campo]
+        return undefined
+      },
+    )
+    return FacturacionListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
 }
 
 /**
@@ -183,6 +218,14 @@ export class HttpCliente implements ApiClient {
   }
   listarDocumentosVenta(p: ParametrosLista): Promise<DocumentoVentaListado> {
     return this.pedir('/ventas/documentos', p, DocumentoVentaListadoSchema)
+  }
+
+  obtenerPanelResumen(empresaSlug: string): Promise<PanelResumen> {
+    return this.pedir('/panel/resumen', { empresaSlug, pagina: 1, porPagina: 1, orden: null }, PanelResumenSchema)
+  }
+
+  listarComprobantes(p: ParametrosLista): Promise<FacturacionListado> {
+    return this.pedir('/facturacion/comprobantes', p, FacturacionListadoSchema)
   }
 }
 

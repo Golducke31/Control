@@ -3,7 +3,7 @@ import type { Marca } from './catalogo.ts'
 import type { Producto } from './catalogo.ts'
 import type { NivelStock } from './stock.ts'
 import type { MovimientoStock } from './stock.ts'
-import type { DocumentoVenta } from './ventas.ts'
+import type { DocumentoVenta, PanelResumen, ComprobanteFiscal } from './ventas.ts'
 import type { Miembro } from './gobierno.ts'
 import type { AuditoriaEvento } from './gobierno.ts'
 import type { Tarea } from './gobierno.ts'
@@ -225,6 +225,15 @@ export const movimientos: MovimientoStock[] = [
   },
 ]
 
+/**
+ * Cadena de operación de ventas (cotización → pedido → remito → factura →
+ * devolución). Incluye a propósito los dos casos de la puerta de F4:
+ *
+ * - `dv_001` (COT-0001) está `pendiente` pero **vencida** (`venceEn` en el pasado):
+ *   la cadena no ofrece `aceptar`.
+ * - `dv_003` (REM-0098) está `facturado` en su totalidad (`facturadoCompleto`):
+ *   la cadena no ofrece `facturar` de nuevo.
+ */
 export const documentosVenta: DocumentoVenta[] = [
   {
     id: 'dv_001',
@@ -235,6 +244,28 @@ export const documentosVenta: DocumentoVenta[] = [
     total: 358000,
     moneda: 'ARS',
     fecha: '2026-09-15T10:00:00.000Z',
+    venceEn: '2026-09-10',
+  },
+  {
+    id: 'dv_006',
+    tipo: 'cotizacion',
+    numero: 'COT-0003',
+    cliente: 'Kiosco Centro',
+    estado: 'pendiente',
+    total: 42000,
+    moneda: 'ARS',
+    fecha: '2026-09-18T09:00:00.000Z',
+    venceEn: '2026-10-15',
+  },
+  {
+    id: 'dv_007',
+    tipo: 'cotizacion',
+    numero: 'COT-0004',
+    cliente: 'Bar Norte',
+    estado: 'borrador',
+    total: 88000,
+    moneda: 'ARS',
+    fecha: '2026-09-19T11:00:00.000Z',
   },
   {
     id: 'dv_002',
@@ -247,6 +278,16 @@ export const documentosVenta: DocumentoVenta[] = [
     fecha: '2026-09-16T12:30:00.000Z',
   },
   {
+    id: 'dv_008',
+    tipo: 'pedido',
+    numero: 'PED-0043',
+    cliente: 'Distribuidora Sur',
+    estado: 'pendiente',
+    total: 200000,
+    moneda: 'ARS',
+    fecha: '2026-09-17T14:00:00.000Z',
+  },
+  {
     id: 'dv_003',
     tipo: 'remito',
     numero: 'REM-0098',
@@ -255,26 +296,104 @@ export const documentosVenta: DocumentoVenta[] = [
     total: 358000,
     moneda: 'ARS',
     fecha: '2026-09-17T15:00:00.000Z',
+    facturadoCompleto: true,
+  },
+  {
+    id: 'dv_009',
+    tipo: 'remito',
+    numero: 'REM-0099',
+    cliente: 'Mayorista Norte',
+    estado: 'pendiente',
+    total: 1245000,
+    moneda: 'ARS',
+    fecha: '2026-09-18T16:00:00.000Z',
+    facturadoCompleto: false,
   },
   {
     id: 'dv_004',
     tipo: 'factura',
     numero: 'FAC-A-00131',
     cliente: 'Mayorista Norte',
-    estado: 'facturado',
+    estado: 'pendiente',
     total: 1245000,
     moneda: 'ARS',
     fecha: '2026-09-17T15:30:00.000Z',
   },
   {
+    id: 'dv_010',
+    tipo: 'factura',
+    numero: 'FAC-A-00132',
+    cliente: 'Distribuidora Sur',
+    estado: 'borrador',
+    total: 358000,
+    moneda: 'ARS',
+    fecha: '2026-09-18T17:00:00.000Z',
+  },
+  {
     id: 'dv_005',
-    tipo: 'cotizacion',
-    numero: 'COT-0002',
+    tipo: 'devolucion',
+    numero: 'DEV-0001',
     cliente: 'Kiosco Centro',
-    estado: 'vencido',
+    estado: 'borrador',
     total: 42000,
     moneda: 'ARS',
-    fecha: '2026-08-20T09:00:00.000Z',
+    fecha: '2026-09-19T08:00:00.000Z',
+  },
+]
+
+export const panelResumen: PanelResumen = {
+  empresa: 'andes',
+  periodo: '2026-09',
+  kpis: [
+    { id: 'ventas_mes', etiqueta: 'Ventas del mes', valor: 1845000, moneda: 'ARS', tendencia: 'sube' },
+    { id: 'cobranzas', etiqueta: 'Cobranzas', valor: 1320000, moneda: 'ARS', tendencia: 'sube' },
+    { id: 'pendientes', etiqueta: 'Documentos pendientes', valor: 4, moneda: null, tendencia: 'baja' },
+    { id: 'stock_bajo', etiqueta: 'Productos bajo stock', valor: 2, moneda: null, tendencia: 'plana' },
+  ],
+}
+
+export const comprobantes: ComprobanteFiscal[] = [
+  {
+    id: 'cp_001',
+    numero: 'FAC-A-00131',
+    tipo: 'factura',
+    cliente: 'Mayorista Norte',
+    total: 1245000,
+    moneda: 'ARS',
+    autorizacion: '21150123456789',
+    resultado: 'A',
+    estado: 'autorizada',
+    pagado: 600000,
+    payment_status: 'parcial',
+    fecha: '2026-09-17T15:30:00.000Z',
+  },
+  {
+    id: 'cp_002',
+    numero: 'FAC-A-00132',
+    tipo: 'factura',
+    cliente: 'Distribuidora Sur',
+    total: 358000,
+    moneda: 'ARS',
+    autorizacion: null,
+    resultado: 'P',
+    estado: 'borrador',
+    pagado: 0,
+    payment_status: 'pendiente',
+    fecha: '2026-09-18T17:00:00.000Z',
+  },
+  {
+    id: 'cp_003',
+    numero: 'NC-A-0007',
+    tipo: 'nota_credito',
+    cliente: 'Kiosco Centro',
+    total: 42000,
+    moneda: 'ARS',
+    autorizacion: '21150987654321',
+    resultado: 'A',
+    estado: 'autorizada',
+    pagado: 0,
+    payment_status: 'pagado',
+    fecha: '2026-09-19T08:30:00.000Z',
   },
 ]
 
