@@ -1,17 +1,41 @@
+import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { getCliente } from '@/datos/cliente'
+import { StockCliente } from './StockCliente'
+import type { ResumenDeStock } from './StockCliente'
 
-import { VentanaPendiente } from '@/componentes/VentanaPendiente'
-import { ventanaPorId } from '@/rutas'
+export const metadata: Metadata = { title: 'Stock' }
 
 /**
- * La ventana se declara en el mapa de rutas, con su permiso, su grupo y sus subrutas.
- * El contenido llega en la fase que el mapa indica; hasta entonces esta página muestra
- * lo que el mapa dice de ella, para que la arquitectura sea verificable a simple vista.
+ * Stock (F5).
+ *
+ * Server Component: resuelve la primera página de niveles y, por separado, el
+ * resumen que alimenta los indicadores —que necesita la lista **completa**, no la
+ * página visible—. La primera página viaja como `initialData` a React Query, así que
+ * la pintura inicial no tiene cascada de peticiones (§5.3).
  */
-const ventana = ventanaPorId('stock')
+export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const cliente = getCliente()
 
-export const metadata: Metadata = { title: ventana.titulo }
+  const [inicial, todos, depositos, reposicion] = await Promise.all([
+    cliente.listarNiveles({ empresaSlug: slug, pagina: 1, porPagina: 10 }),
+    cliente.listarNiveles({ empresaSlug: slug, pagina: 1, porPagina: 500 }),
+    cliente.listarDepositos({ empresaSlug: slug, pagina: 1, porPagina: 500 }),
+    cliente.listarReposicion({ empresaSlug: slug, pagina: 1, porPagina: 500 }),
+  ])
 
-export default function Pagina() {
-  return <VentanaPendiente ventana={ventana} />
+  const resumen: ResumenDeStock = {
+    niveles: todos.paginacion.total,
+    unidades: todos.items.reduce((suma, n) => suma + n.cantidad, 0),
+    reservadas: todos.items.reduce((suma, n) => suma + n.reservada, 0),
+    depositos: depositos.paginacion.total,
+    bajoMinimo: reposicion.paginacion.total,
+  }
+
+  return (
+    <Suspense>
+      <StockCliente slug={slug} initialData={inicial} resumen={resumen} />
+    </Suspense>
+  )
 }

@@ -1,7 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { SimuladoCliente } from './cliente.ts'
-import { ProductoListadoSchema, DocumentoVentaListadoSchema, FacturacionListadoSchema, PanelResumenSchema } from '@control/contracts'
+import {
+  ProductoListadoSchema,
+  DocumentoVentaListadoSchema,
+  FacturacionListadoSchema,
+  PanelResumenSchema,
+  ConciliacionSchema,
+  DepositoListadoSchema,
+  TransferenciaListadoSchema,
+  ReposicionListadoSchema,
+} from '@control/contracts'
 
 const cliente = new SimuladoCliente()
 
@@ -77,4 +86,142 @@ test('listarComprobantes valida y filtra por texto', async () => {
   })
   assert.ok(filtrado.paginacion.total < r.paginacion.total)
   assert.ok(filtrado.items.every((c) => `${c.numero} ${c.cliente}`.toLowerCase().includes('mayorista')))
+})
+
+// ---------------------------------------------------------------------------
+// Inventario (F5). Las lecturas van primero: las escrituras de más abajo mutan el
+// almacén en proceso del adaptador simulado, y el orden importa.
+// ---------------------------------------------------------------------------
+
+test('obtenerConciliacion corre la misma función que el job y reporta el desvío sembrado', async () => {
+  const r = await cliente.obtenerConciliacion('andes')
+  assert.deepEqual(ConciliacionSchema.parse(r), r)
+  assert.equal(r.empresa, 'andes')
+  assert.equal(r.nivelesRevisados, 5)
+  assert.equal(r.cuadra, false, 'el libro no explica todo el saldo, y el job lo dice')
+  assert.equal(r.diferencias.length, 1, 'un solo desvío, el sembrado a propósito')
+  assert.equal(r.diferencias[0]?.diferencia, -3)
+})
+
+test('listarDepositos valida y trae los tres depósitos', async () => {
+  const r = await cliente.listarDepositos({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.deepEqual(DepositoListadoSchema.parse(r), r)
+  assert.equal(r.paginacion.total, 3)
+})
+
+test('listarTransferencias valida y ordena por unidades', async () => {
+  const r = await cliente.listarTransferencias({
+    empresaSlug: 'andes',
+    pagina: 1,
+    porPagina: 50,
+    orden: { campo: 'unidades', dir: 'desc' },
+  })
+  assert.deepEqual(TransferenciaListadoSchema.parse(r), r)
+  const unidades = r.items.map((t) => t.items.reduce((s, i) => s + i.cantidadEnviada, 0))
+  assert.deepEqual(unidades, [...unidades].sort((a, b) => b - a), 'descendente por unidades')
+})
+
+test('listarReposicion valida y sólo trae lo que está bajo el mínimo', async () => {
+  const r = await cliente.listarReposicion({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.deepEqual(ReposicionListadoSchema.parse(r), r)
+  assert.ok(r.items.length > 0)
+  assert.ok(r.items.every((x) => x.disponible < x.minimo), 'todo lo listado está bajo el mínimo')
+})
+
+test('aplicarRecuento ajusta el saldo y deja la fila en el libro, visible en la lectura siguiente', async () => {
+  const antes = await cliente.listarNiveles({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const objetivo = antes.items[0]
+  assert.ok(objetivo !== undefined)
+  if (objetivo === undefined) return
+
+  const libroAntes = await cliente.listarMovimientos({ empresaSlug: 'andes', pagina: 1, porPagina: 100 })
+
+  const r = await cliente.aplicarRecuento({
+    empresaSlug: 'andes',
+    nivel: objetivo,
+    contado: objetivo.cantidad - 2,
+  })
+  assert.equal(r.ok, true)
+  if (!r.ok) return
+  assert.equal(r.ajuste.nivel.cantidad, objetivo.cantidad - 2)
+
+  const despues = await cliente.listarNiveles({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const actualizado = despues.items.find(
+    (n) => n.productoId === objetivo.productoId && n.depositoId === objetivo.depositoId,
+  )
+  assert.equal(actualizado?.cantidad, objetivo.cantidad - 2, 'la escritura se ve en la lectura siguiente')
+
+  const libroDespues = await cliente.listarMovimientos({ empresaSlug: 'andes', pagina: 1, porPagina: 100 })
+  assert.equal(libroDespues.paginacion.total, libroAntes.paginacion.total + 1, 'el libro ganó una fila')
+})
+
+test('aplicarRecuento rechaza contar por debajo de lo reservado', async () => {
+  const lista = await cliente.listarNiveles({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const conReserva = lista.items.find((n) => n.reservada > 0)
+  assert.ok(conReserva !== undefined, 'hay un nivel con reserva para probar')
+  if (conReserva === undefined) return
+
+  const r = await cliente.aplicarRecuento({ empresaSlug: 'andes', nivel: conReserva, contado: 0 })
+  assert.equal(r.ok, false)
+  if (r.ok) return
+  assert.equal(r.motivo, 'contado_por_debajo_de_lo_reservado')
+})
+
+test('confirmarTransferencia con una versión vieja avisa y no cambia nada', async () => {
+  const lista = await cliente.listarTransferencias({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const borrador = lista.items.find((t) => t.estado === 'draft')
+  assert.ok(borrador !== undefined)
+  if (borrador === undefined) return
+
+  const r = await cliente.confirmarTransferencia({
+    empresaSlug: 'andes',
+    id: borrador.id,
+    accion: 'despachar',
+    versionEsperada: '2020-01-01T00:00:00.000Z',
+  })
+  assert.equal(r.ok, false)
+  if (r.ok) return
+  assert.equal(r.motivo, 'conflicto_de_version')
+  assert.equal(r.versionActual, borrador.actualizadaEn)
+
+  const despues = await cliente.listarTransferencias({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.equal(despues.items.find((t) => t.id === borrador.id)?.estado, 'draft', 'sigue en borrador')
+})
+
+test('confirmarTransferencia con la versión vigente despacha y mueve el saldo del origen', async () => {
+  const lista = await cliente.listarTransferencias({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const borrador = lista.items.find((t) => t.estado === 'draft')
+  assert.ok(borrador !== undefined)
+  if (borrador === undefined) return
+
+  const item = borrador.items[0]
+  assert.ok(item !== undefined)
+  if (item === undefined) return
+
+  const nivelesAntes = await cliente.listarNiveles({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const origenAntes = nivelesAntes.items.find(
+    (n) => n.productoId === item.productoId && n.depositoId === borrador.desdeId,
+  )
+
+  const r = await cliente.confirmarTransferencia({
+    empresaSlug: 'andes',
+    id: borrador.id,
+    accion: 'despachar',
+    versionEsperada: borrador.actualizadaEn,
+  })
+  assert.equal(r.ok, true)
+  if (!r.ok) return
+  assert.equal(r.transferencia.estado, 'dispatched')
+  assert.equal(r.movimientos.length, 1, 'despachar registra sólo la salida')
+  assert.equal(r.movimientos[0]?.tipo, 'transfer_out')
+
+  const nivelesDespues = await cliente.listarNiveles({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const origenDespues = nivelesDespues.items.find(
+    (n) => n.productoId === item.productoId && n.depositoId === borrador.desdeId,
+  )
+  assert.equal(
+    origenDespues?.cantidad,
+    (origenAntes?.cantidad ?? 0) - item.cantidadEnviada,
+    'el saldo del origen bajó lo que salió',
+  )
 })

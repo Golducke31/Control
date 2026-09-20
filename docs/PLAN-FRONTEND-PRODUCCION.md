@@ -9,7 +9,7 @@
 - [`PLAN-ERP-MULTIEMPRESA.md`](PLAN-ERP-MULTIEMPRESA.md) — brechas funcionales y fases E0–E9. **Este plan se ejecuta en paralelo a E7**, no lo reemplaza.
 - `prototype/index.html` — prototipo de diseño que este plan reemplaza.
 
-> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos** y **F4 · Operación diaria** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel** (KPIs del período), **Ventas** (la cadena completa de documentos con las transiciones válidas en la barra de acciones) y **Facturación** (comprobantes fiscales con estado de AFIP y de cobro), más la lógica pura de transiciones de la cadena. Lo que sigue es **F5 · Inventario**.
+> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos**, **F4 · Operación diaria** y **F5 · Inventario** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel** (KPIs del período), **Ventas** (la cadena completa de documentos con las transiciones válidas en la barra de acciones) y **Facturación** (comprobantes fiscales con estado de AFIP y de cobro), más la lógica pura de transiciones de la cadena. F5 entregó la ventana **Stock** completa —niveles, libro mayor, depósitos, transferencias con detalle, reposición, **recuento** y **conciliación**—, más la lógica pura de inventario (`aplicarRecuento`, `aplicarTransferencia` con bloqueo optimista, `conciliar`) y el primer camino de **escritura** del frontend sobre el adaptador simulado. Lo que sigue es **F6 · Finanzas**.
 >
 > Tres ajustes respecto de lo planeado, decididos al implementar y documentados donde corresponden:
 > 1. `packages/contracts` y `packages/graficos` se crean en **F3** y **F4**, con su primer consumidor real, no en F1: un paquete sin consumidor es un lastre que nadie mantiene.
@@ -922,7 +922,28 @@ Panel, Ventas (las 15 sub-rutas) y Facturación (las 5). Es la fase que ejercita
 ### F5 · Inventario
 Catálogo (5 sub-rutas) y Stock (8 sub-rutas), incluidos recuento, transferencia con bloqueo optimista y la ventana de conciliación que muestra el resultado del job.
 
+**Alcance entregado en esta pasada.** La ventana **Stock** completa: raíz (niveles con indicadores), `movimientos`, `depositos`, `transferencias`, `transferencias/[id]`, `reposicion`, `recuento` y `conciliacion`. La lógica pura de inventario vive en `packages/contracts/src/inventario.ts` (`aplicarRecuento`, `aplicarTransferencia`, `conciliar`, `accionesTransferencia`, `deltaDeMovimiento`) con su suite. F5 trae además el **primer camino de escritura** del frontend: `aplicarRecuento` y `confirmarTransferencia` mutan el almacén del adaptador simulado —que pasa a ser *module-level*, porque el estado de instancia se perdía entre el Server Component y el componente cliente— y mueven el saldo junto con el libro.
+
+**Sub-rutas de Catálogo pendientes.** `nuevo`, `[id]`, `categorias`, `marcas` e `importar` quedan como seguimiento: son formularios de alta y edición que no tocan ninguna regla de esta puerta. La raíz de Catálogo ya estaba cableada desde F3. Tampoco entra `transferencias/nueva`: crear una transferencia es un formulario, y el mecanismo que la puerta exige —el bloqueo optimista al escribir sobre una existente— se ejerce en el detalle.
+
+**Una corrección de modelo.** El contrato **no** tiene un `RecuentoSchema`: el motor no tiene tabla de recuentos, y un recuento es un conjunto de movimientos de ajuste que entran por `app.apply_stock_movement` («único punto de mutación de stock»). La planilla de conteo es estado de pantalla; lo que queda escrito es el libro. Modelarla como documento habría inventado una tabla que el backend no tiene.
+
 **Puerta:** el recuento ajusta el saldo y queda en el libro mayor; la transferencia con edición concurrente avisa y no pisa.
+
+| Criterio de la puerta | Evidencia | Resultado |
+| --- | --- | --- |
+| El recuento ajusta el saldo **y** queda en el libro mayor | `aplicarRecuento` devuelve las dos cosas juntas (`{ nivel, movimiento }`); `inventario.test.ts`, PUERTA F5·1 | ✅ |
+| Un recuento sin diferencia no escribe nada | `movimiento: null` cuando el delta es 0 — el motor tampoco llamaría a `apply_stock_movement` | ✅ |
+| Contar por debajo de lo reservado se rechaza | Espeja el CHECK `sl_reserved_le_on_hand`; motivo `contado_por_debajo_de_lo_reservado` (negativa de F5·1) | ✅ |
+| La transferencia con edición concurrente **avisa** | `aplicarTransferencia` devuelve `{ ok: false, motivo: 'conflicto_de_version', versionActual }`; PUERTA F5·2 | ✅ |
+| …y **no pisa**: un conflicto no devuelve estado para escribir | El resultado del rechazo no tiene campo `transferencia`; se afirma en la suite y el adaptador no muta nada | ✅ |
+| El «hoy»/la versión son reproducibles, no estado oculto | La fecha y `versionEsperada` entran por parámetro; el detalle conserva la versión que leyó | ✅ |
+| La conciliación reporta sin corregir | `conciliar()` es pura; la ventana no tiene acción correctiva, sólo el enlace a Recuento | ✅ |
+| La conciliación es sensible a las escrituras | Corre sobre el almacén vivo: despachar una transferencia desde la interfaz mueve el saldo y el libro, y la diferencia no cambia | ✅ |
+
+**Verificación mecánica.** `npm run verify` en verde; typecheck de 5 workspaces; `node --test` en `packages/contracts` (**50**) y `apps/web` (**57**) en verde; `next build` de `@control/web` exitoso.
+
+**Nota de verificación pendiente.** La comprobación *en navegador* del bloqueo optimista —dos pantallas escribiendo sobre la misma transferencia— no se pudo automatizar: `agent-browser` no corre en Windows. La regla está probada en la suite y el detalle la expone en una sola pestaña (la versión en pantalla no se sincroniza sola después de escribir, a propósito).
 
 ### F6 · Finanzas
 Compras (11), Tesorería (8), Contabilidad (7) y Fiscal (7). **Requiere la migración `0026` de permisos** (§4.7).

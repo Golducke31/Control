@@ -1,24 +1,45 @@
 import type {
-  ProductoListado,
-  NivelStockListado,
-  MovimientoStockListado,
+  AccionTransferencia,
+  Conciliacion,
+  DepositoListado,
   DocumentoVentaListado,
-  PanelResumen,
   FacturacionListado,
+  MovimientoStock,
+  MovimientoStockListado,
+  NivelStock,
+  NivelStockListado,
   Orden,
+  PanelResumen,
+  ProductoListado,
+  ReposicionListado,
+  ResultadoRecuento,
+  ResultadoTransferencia,
+  TransferenciaListado,
 } from '@control/contracts'
 import {
-  ProductoListadoSchema,
-  NivelStockListadoSchema,
-  MovimientoStockListadoSchema,
+  ConciliacionSchema,
+  DepositoListadoSchema,
   DocumentoVentaListadoSchema,
-  PanelResumenSchema,
   FacturacionListadoSchema,
+  MovimientoStockListadoSchema,
+  NivelStockListadoSchema,
+  PanelResumenSchema,
+  ProductoListadoSchema,
+  ReposicionListadoSchema,
+  TransferenciaListadoSchema,
+  aplicarRecuento,
+  aplicarTransferencia,
+  conciliar,
+  deltaDeMovimiento,
 } from '@control/contracts'
 import {
   productos,
   niveles,
   movimientos,
+  depositos,
+  transferencias,
+  reposicion,
+  conciliacionEjecutadaEn,
   documentosVenta,
   panelResumen,
   comprobantes,
@@ -48,6 +69,26 @@ export interface ApiClient {
   /** Resumen del panel de operación diaria (objeto único, no una colección). */
   obtenerPanelResumen(empresaSlug: string): Promise<PanelResumen>
   listarComprobantes(p: ParametrosLista): Promise<FacturacionListado>
+
+  // --- Inventario (F5) ---
+  listarDepositos(p: ParametrosLista): Promise<DepositoListado>
+  listarTransferencias(p: ParametrosLista): Promise<TransferenciaListado>
+  listarReposicion(p: ParametrosLista): Promise<ReposicionListado>
+  /** Resultado del job `stock.reconciliation` (objeto único). */
+  obtenerConciliacion(empresaSlug: string): Promise<Conciliacion>
+  /** Aplica un recuento físico: ajusta el saldo y escribe el libro. */
+  aplicarRecuento(p: {
+    empresaSlug: string
+    nivel: NivelStock
+    contado: number
+  }): Promise<ResultadoRecuento>
+  /** Confirma una transición de transferencia con la versión que el cliente leyó. */
+  confirmarTransferencia(p: {
+    empresaSlug: string
+    id: string
+    accion: AccionTransferencia
+    versionEsperada: string
+  }): Promise<ResultadoTransferencia>
 }
 
 /** Pequeño motor de consulta en memoria sobre los fixtures. */
@@ -85,6 +126,46 @@ function consultar<T>(
 }
 
 /**
+ * El almacén en proceso del adaptador simulado.
+ *
+ * Es **module-level** y no de instancia a propósito: `getCliente()` construye un
+ * cliente nuevo en cada llamada —el Server Component y el componente cliente piden el
+ * suyo—, así que un estado de instancia se perdería entre la escritura y la lectura
+ * que la sigue. El adaptador simulado *es* el servidor en esta fase: su almacén tiene
+ * que durar lo que dura el proceso, igual que una base.
+ *
+ * Las lecturas pasan por acá y no por los fixtures directos, para que una escritura
+ * simulada se vea en la pantalla siguiente.
+ */
+const almacen = {
+  niveles: [...niveles],
+  movimientos: [...movimientos],
+  transferencias: [...transferencias],
+}
+
+/**
+ * Aplica el efecto de una lista de movimientos sobre los saldos materializados.
+ *
+ * Espeja lo que hace el motor dentro de la misma transacción: el libro y el saldo se
+ * mueven juntos. Si el movimiento dejaría el saldo por debajo de lo reservado, se
+ * omite —el motor abortaría con el CHECK `sl_reserved_le_on_hand`— en vez de dejar un
+ * nivel inválido dando vueltas.
+ */
+function aplicarAlSaldo(movimientos: readonly MovimientoStock[]): void {
+  for (const movimiento of movimientos) {
+    const i = almacen.niveles.findIndex(
+      (n) => n.productoId === movimiento.productoId && n.depositoId === movimiento.depositoId,
+    )
+    if (i === -1) continue
+    const actual = almacen.niveles[i]
+    if (actual === undefined) continue
+    const cantidad = actual.cantidad + deltaDeMovimiento(movimiento)
+    if (cantidad < actual.reservada) continue
+    almacen.niveles[i] = { ...actual, cantidad, disponible: cantidad - actual.reservada }
+  }
+}
+
+/**
  * Adaptador simulado.
  *
  * No usa MSW: resuelve en proceso y devuelve los fixtures **validados con Zod en
@@ -113,7 +194,7 @@ export class SimuladoCliente implements ApiClient {
 
   async listarNiveles(p: ParametrosLista): Promise<NivelStockListado> {
     const r = consultar(
-      niveles,
+      almacen.niveles,
       p,
       (x) => `${x.sku} ${x.nombre} ${x.depositoNombre}`,
       (x, campo) => {
@@ -130,7 +211,7 @@ export class SimuladoCliente implements ApiClient {
 
   async listarMovimientos(p: ParametrosLista): Promise<MovimientoStockListado> {
     const r = consultar(
-      movimientos,
+      almacen.movimientos,
       p,
       (x) => `${x.sku} ${x.nombre} ${x.tipo} ${x.motivo ?? ''}`,
       (x, campo) => {
@@ -182,6 +263,119 @@ export class SimuladoCliente implements ApiClient {
       paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
     })
   }
+
+  // --- Inventario (F5) ---
+
+  async listarDepositos(p: ParametrosLista): Promise<DepositoListado> {
+    const r = consultar(
+      depositos,
+      p,
+      (x) => `${x.nombre} ${x.direccion ?? ''}`,
+      (x, campo) => {
+        if (campo === 'nombre') return x.nombre
+        if (campo === 'activo') return x.activo === true ? 1 : 0
+        return undefined
+      },
+    )
+    return DepositoListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarTransferencias(p: ParametrosLista): Promise<TransferenciaListado> {
+    const r = consultar(
+      almacen.transferencias,
+      p,
+      (x) => `${x.codigo} ${x.desdeNombre} ${x.hastaNombre} ${x.estado}`,
+      (x, campo) => {
+        if (campo === 'codigo' || campo === 'desdeNombre' || campo === 'hastaNombre' || campo === 'estado')
+          return x[campo]
+        if (campo === 'unidades') return x.items.reduce((s, i) => s + i.cantidadEnviada, 0)
+        return undefined
+      },
+    )
+    return TransferenciaListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarReposicion(p: ParametrosLista): Promise<ReposicionListado> {
+    const r = consultar(
+      reposicion,
+      p,
+      (x) => `${x.sku} ${x.nombre} ${x.depositoNombre}`,
+      (x, campo) => {
+        if (campo === 'nombre' || campo === 'sku' || campo === 'disponible' || campo === 'minimo' || campo === 'sugerido')
+          return x[campo]
+        return undefined
+      },
+    )
+    return ReposicionListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async obtenerConciliacion(empresaSlug: string): Promise<Conciliacion> {
+    // Se calcula con la misma función pura que corre el job, sobre el almacén vivo:
+    // así una transferencia despachada desde la interfaz se refleja en el informe.
+    const resultado = conciliar(almacen.niveles, almacen.movimientos)
+    return ConciliacionSchema.parse({
+      ejecutadaEn: conciliacionEjecutadaEn,
+      nivelesRevisados: resultado.filas.length,
+      diferencias: resultado.diferencias,
+      cuadra: resultado.cuadra,
+      empresa: empresaSlug,
+    })
+  }
+
+  async aplicarRecuento(p: {
+    empresaSlug: string
+    nivel: NivelStock
+    contado: number
+  }): Promise<ResultadoRecuento> {
+    const i = almacen.niveles.findIndex(
+      (n) => n.productoId === p.nivel.productoId && n.depositoId === p.nivel.depositoId,
+    )
+    const actual = i === -1 ? p.nivel : almacen.niveles[i]
+    if (actual === undefined) return aplicarRecuento(p.nivel, p.contado, { idMovimiento: '', fecha: '' })
+
+    const resultado = aplicarRecuento(actual, p.contado, {
+      idMovimiento: `mv_rec_${actual.productoId}_${actual.depositoId}_${almacen.movimientos.length + 1}`,
+      fecha: new Date().toISOString(),
+    })
+    if (!resultado.ok) return resultado
+
+    if (i !== -1) almacen.niveles[i] = resultado.ajuste.nivel
+    if (resultado.ajuste.movimiento !== null) almacen.movimientos.push(resultado.ajuste.movimiento)
+    return resultado
+  }
+
+  async confirmarTransferencia(p: {
+    empresaSlug: string
+    id: string
+    accion: AccionTransferencia
+    versionEsperada: string
+  }): Promise<ResultadoTransferencia> {
+    const i = almacen.transferencias.findIndex((t) => t.id === p.id)
+    const actual = almacen.transferencias[i]
+    if (actual === undefined) {
+      return { ok: false, motivo: 'transicion_invalida', estado: 'received' }
+    }
+
+    const resultado = aplicarTransferencia(actual, p.accion, p.versionEsperada, {
+      fecha: new Date().toISOString(),
+      prefijo: `mv_${actual.codigo}`,
+    })
+    if (!resultado.ok) return resultado
+
+    if (i !== -1) almacen.transferencias[i] = resultado.transferencia
+    almacen.movimientos.push(...resultado.movimientos)
+    aplicarAlSaldo(resultado.movimientos)
+    return resultado
+  }
 }
 
 /**
@@ -226,6 +420,36 @@ export class HttpCliente implements ApiClient {
 
   listarComprobantes(p: ParametrosLista): Promise<FacturacionListado> {
     return this.pedir('/facturacion/comprobantes', p, FacturacionListadoSchema)
+  }
+
+  listarDepositos(p: ParametrosLista): Promise<DepositoListado> {
+    return this.pedir('/stock/depositos', p, DepositoListadoSchema)
+  }
+  listarTransferencias(p: ParametrosLista): Promise<TransferenciaListado> {
+    return this.pedir('/stock/transferencias', p, TransferenciaListadoSchema)
+  }
+  listarReposicion(p: ParametrosLista): Promise<ReposicionListado> {
+    return this.pedir('/stock/reposicion', p, ReposicionListadoSchema)
+  }
+  obtenerConciliacion(empresaSlug: string): Promise<Conciliacion> {
+    return this.pedir(
+      '/stock/conciliacion',
+      { empresaSlug, pagina: 1, porPagina: 1, orden: null },
+      ConciliacionSchema,
+    )
+  }
+
+  /**
+   * Las dos escrituras de inventario quedan declaradas pero no implementadas sobre
+   * HTTP: el backend llega en F9. Se falla con un mensaje explícito en vez de devolver
+   * un resultado inventado, que es lo que haría pasar un test de integración en falso.
+   * El modo por defecto es `simulado`, donde las dos están implementadas de verdad.
+   */
+  async aplicarRecuento(): Promise<ResultadoRecuento> {
+    throw new Error('aplicarRecuento sobre HTTP llega con el backend (F9); usá NEXT_PUBLIC_API_MODE=simulado')
+  }
+  async confirmarTransferencia(): Promise<ResultadoTransferencia> {
+    throw new Error('confirmarTransferencia sobre HTTP llega con el backend (F9); usá NEXT_PUBLIC_API_MODE=simulado')
   }
 }
 

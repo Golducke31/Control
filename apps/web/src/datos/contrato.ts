@@ -35,7 +35,7 @@ export const CONTRATOS: Record<string, ContratoVentana> = {
   ventas: { ventanaId: 'ventas', endpoint: '/api/v1/ventas/documentos', esquema: DocumentoVentaListadoSchema, estado: 'listo' },
   facturacion: { ventanaId: 'facturacion', endpoint: '/api/v1/facturacion/comprobantes', esquema: FacturacionListadoSchema, estado: 'listo' },
   catalogo: { ventanaId: 'catalogo', endpoint: '/api/v1/catalogo/productos', esquema: ProductoListadoSchema, estado: 'listo' },
-  stock: { ventanaId: 'stock', endpoint: '/api/v1/stock/niveles', esquema: NivelStockListadoSchema, estado: 'pendiente' },
+  stock: { ventanaId: 'stock', endpoint: '/api/v1/stock/niveles', esquema: NivelStockListadoSchema, estado: 'listo' },
   compras: { ventanaId: 'compras', endpoint: '/api/v1/compras/ordenes', esquema: PendienteSchema, estado: 'pendiente' },
   tesoreria: { ventanaId: 'tesoreria', endpoint: '/api/v1/tesoreria/movimientos', esquema: PendienteSchema, estado: 'pendiente' },
   contabilidad: { ventanaId: 'contabilidad', endpoint: '/api/v1/contabilidad/asientos', esquema: PendienteSchema, estado: 'pendiente' },

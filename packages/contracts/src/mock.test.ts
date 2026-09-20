@@ -1,13 +1,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ProductoSchema, ProductoListadoSchema } from './catalogo.ts'
-import { NivelStockSchema } from './stock.ts'
+import {
+  DepositoSchema,
+  NivelStockSchema,
+  ReposicionSchema,
+  TransferenciaSchema,
+} from './stock.ts'
 import { DocumentoVentaSchema } from './ventas.ts'
 import { MiembroSchema } from './gobierno.ts'
 import {
   productos,
   niveles,
   movimientos,
+  depositos,
+  transferencias,
+  reposicion,
   documentosVenta,
   miembros,
   auditoria,
@@ -96,4 +104,41 @@ test('un nivel con disponible inconsistente se detecta antes de validar', () => 
     (n, i) => i === 0 && n.disponible !== n.cantidad - n.reservada,
   )
   assert.ok(inconsistente !== undefined, 'la regla de negocio se puede verificar')
+})
+
+test('los fixtures de inventario validan contra sus esquemas', () => {
+  for (const d of depositos) DepositoSchema.parse(d)
+  for (const t of transferencias) TransferenciaSchema.parse(t)
+  for (const r of reposicion) ReposicionSchema.parse(r)
+})
+
+test('cada transferencia sale de un depósito distinto al que llega', () => {
+  // Espeja el CHECK `st_distinct_wr` del motor: un fixture que lo rompiera estaría
+  // mostrando un documento que la base no podría haber aceptado.
+  for (const t of transferencias) {
+    assert.notEqual(t.desdeId, t.hastaId, `${t.codigo} sale y llega al mismo depósito`)
+  }
+})
+
+test('las transferencias despachadas o recibidas tienen su salida en el libro', () => {
+  // Una transferencia que movió stock y no dejó rastro en el libro es exactamente lo
+  // que la conciliación tiene que detectar; acá se vigila que los fixtures no lo hagan.
+  const conSalida = transferencias.filter((t) => t.estado === 'dispatched' || t.estado === 'received')
+  assert.ok(conSalida.length > 0, 'hay al menos una transferencia que movió stock')
+  for (const t of conSalida) {
+    assert.ok(
+      movimientos.some((m) => m.documento === t.codigo && m.tipo === 'transfer_out'),
+      `${t.codigo} movió stock pero no tiene su transfer_out en el libro`,
+    )
+  }
+})
+
+test('la reposición sugiere al menos lo que falta para llegar al mínimo', () => {
+  for (const r of reposicion) {
+    assert.ok(r.disponible < r.minimo, `${r.sku} no debería estar en reposición`)
+    assert.ok(
+      r.sugerido >= r.minimo - r.disponible,
+      `${r.sku} sugiere ${r.sugerido}, menos de lo que falta (${r.minimo - r.disponible})`,
+    )
+  }
 })

@@ -1,8 +1,11 @@
 import type { Categoria } from './catalogo.ts'
 import type { Marca } from './catalogo.ts'
 import type { Producto } from './catalogo.ts'
+import type { Deposito } from './stock.ts'
 import type { NivelStock } from './stock.ts'
 import type { MovimientoStock } from './stock.ts'
+import type { Reposicion } from './stock.ts'
+import type { Transferencia } from './stock.ts'
 import type { DocumentoVenta, PanelResumen, ComprobanteFiscal } from './ventas.ts'
 import type { Miembro } from './gobierno.ts'
 import type { AuditoriaEvento } from './gobierno.ts'
@@ -175,6 +178,25 @@ export const niveles: NivelStock[] = [
   nivel(prd003, 'dep_central', 'Depósito central', 430, 0),
 ]
 
+export const depositos: Deposito[] = [
+  { id: 'dep_central', nombre: 'Depósito central', empresaSlug: 'andes', direccion: 'Av. Rivadavia 4200, CABA', activo: true },
+  { id: 'dep_sur', nombre: 'Depósito sur', empresaSlug: 'andes', direccion: 'Camino de Cintura 1500, Lanús', activo: true },
+  { id: 'dep_norte', nombre: 'Depósito norte', empresaSlug: 'andes', direccion: 'Ruta 9 km 42, Escobar', activo: false },
+]
+
+/**
+ * El libro mayor de inventario.
+ *
+ * Está armado para que **la conciliación cuadre salvo un desvío deliberado**: en cada
+ * producto y depósito que tiene saldo, la suma de los movimientos da la cantidad del
+ * nivel, excepto `prd_002` en `dep_sur`, donde el libro explica 283 y el saldo declara
+ * 280 —tres unidades que el libro no explica—. Sin ese desvío la ventana de
+ * conciliación mostraría siempre una tabla vacía y nadie sabría si el job funciona.
+ *
+ * Los movimientos de `transfer_out`/`transfer_in` acompañan a las transferencias
+ * (`TRN-0009` ya recibida, `TRN-0012` despachada): una transferencia despachada mueve
+ * el stock del origen aunque el destino todavía no lo haya recibido.
+ */
 export const movimientos: MovimientoStock[] = [
   {
     id: 'mv_001',
@@ -213,6 +235,18 @@ export const movimientos: MovimientoStock[] = [
     documento: 'TRN-0009',
   },
   {
+    id: 'mv_010',
+    productoId: prd003.id,
+    sku: prd003.sku,
+    nombre: prd003.nombre,
+    tipo: 'transfer_in',
+    cantidad: 30,
+    depositoId: 'dep_sur',
+    motivo: 'Traslado desde depósito central',
+    fecha: '2026-09-14T11:00:00.000Z',
+    documento: 'TRN-0009',
+  },
+  {
     id: 'mv_004',
     productoId: prd002.id,
     sku: prd002.sku,
@@ -223,7 +257,168 @@ export const movimientos: MovimientoStock[] = [
     motivo: 'Merma por control de calidad',
     fecha: '2026-09-14T16:40:00.000Z',
   },
+  {
+    id: 'mv_006',
+    productoId: prd001.id,
+    sku: prd001.sku,
+    nombre: prd001.nombre,
+    tipo: 'purchase_in',
+    cantidad: 42,
+    depositoId: 'dep_sur',
+    motivo: 'Recepción OC-2042',
+    fecha: '2026-09-15T09:20:00.000Z',
+    documento: 'OC-2042',
+  },
+  {
+    id: 'mv_008',
+    productoId: prd002.id,
+    sku: prd002.sku,
+    nombre: prd002.nombre,
+    tipo: 'purchase_in',
+    cantidad: 288,
+    depositoId: 'dep_sur',
+    motivo: 'Recepción OC-2044',
+    fecha: '2026-09-16T13:00:00.000Z',
+    documento: 'OC-2044',
+  },
+  {
+    id: 'mv_007',
+    productoId: prd002.id,
+    sku: prd002.sku,
+    nombre: prd002.nombre,
+    tipo: 'purchase_in',
+    cantidad: 800,
+    depositoId: 'dep_central',
+    motivo: 'Recepción OC-2043',
+    fecha: '2026-09-17T10:00:00.000Z',
+    documento: 'OC-2043',
+  },
+  {
+    id: 'mv_011',
+    productoId: prd002.id,
+    sku: prd002.sku,
+    nombre: prd002.nombre,
+    tipo: 'transfer_out',
+    cantidad: -60,
+    depositoId: 'dep_central',
+    motivo: 'Traslado a depósito sur',
+    fecha: '2026-09-18T10:30:00.000Z',
+    documento: 'TRN-0012',
+  },
+  {
+    id: 'mv_005',
+    productoId: prd001.id,
+    sku: prd001.sku,
+    nombre: prd001.nombre,
+    tipo: 'sale_out',
+    cantidad: -20,
+    depositoId: 'dep_central',
+    motivo: 'Venta mostrador',
+    fecha: '2026-09-18T12:00:00.000Z',
+    documento: 'FAC-A-00124',
+  },
+  {
+    id: 'mv_009',
+    productoId: prd003.id,
+    sku: prd003.sku,
+    nombre: prd003.nombre,
+    tipo: 'purchase_in',
+    cantidad: 460,
+    depositoId: 'dep_central',
+    motivo: 'Recepción OC-2045',
+    fecha: '2026-09-19T09:00:00.000Z',
+    documento: 'OC-2045',
+  },
 ]
+
+/**
+ * Transferencias entre depósitos, con los tres estados que la ventana necesita:
+ * una en borrador (ofrece despachar), una despachada (ofrece recibir) y una recibida
+ * (ya no ofrece nada). El detalle de la despachada es donde se ve el bloqueo
+ * optimista: si alguien la modificó antes, la escritura avisa y no pisa.
+ */
+export const transferencias: Transferencia[] = [
+  {
+    id: 'tr_001',
+    codigo: 'TRN-0009',
+    desdeId: 'dep_central',
+    desdeNombre: 'Depósito central',
+    hastaId: 'dep_sur',
+    hastaNombre: 'Depósito sur',
+    estado: 'received',
+    items: [
+      { productoId: prd003.id, sku: prd003.sku, nombre: prd003.nombre, cantidadEnviada: 30, cantidadRecibida: 30 },
+    ],
+    notas: 'Reposición de snacks para la zona sur.',
+    creadaEn: '2026-09-13T09:00:00.000Z',
+    actualizadaEn: '2026-09-14T11:00:00.000Z',
+  },
+  {
+    id: 'tr_002',
+    codigo: 'TRN-0012',
+    desdeId: 'dep_central',
+    desdeNombre: 'Depósito central',
+    hastaId: 'dep_sur',
+    hastaNombre: 'Depósito sur',
+    estado: 'dispatched',
+    items: [
+      { productoId: prd002.id, sku: prd002.sku, nombre: prd002.nombre, cantidadEnviada: 60, cantidadRecibida: null },
+    ],
+    notas: 'Salida en tránsito; el destino todavía no confirmó.',
+    creadaEn: '2026-09-18T08:00:00.000Z',
+    actualizadaEn: '2026-09-18T10:30:00.000Z',
+  },
+  {
+    id: 'tr_003',
+    codigo: 'TRN-0013',
+    desdeId: 'dep_sur',
+    desdeNombre: 'Depósito sur',
+    hastaId: 'dep_central',
+    hastaNombre: 'Depósito central',
+    estado: 'draft',
+    items: [
+      { productoId: prd001.id, sku: prd001.sku, nombre: prd001.nombre, cantidadEnviada: 15, cantidadRecibida: null },
+    ],
+    creadaEn: '2026-09-19T15:00:00.000Z',
+    actualizadaEn: '2026-09-19T15:00:00.000Z',
+  },
+]
+
+/**
+ * Reposición, derivada de `app.v_low_stock`: disponible por debajo del mínimo.
+ * `sugerido` repone hasta el doble del mínimo.
+ */
+export const reposicion: Reposicion[] = [
+  {
+    productoId: prd001.id,
+    sku: prd001.sku,
+    nombre: prd001.nombre,
+    depositoId: 'dep_sur',
+    depositoNombre: 'Depósito sur',
+    disponible: 38,
+    minimo: 50,
+    sugerido: 62,
+  },
+  {
+    productoId: prd002.id,
+    sku: prd002.sku,
+    nombre: prd002.nombre,
+    depositoId: 'dep_sur',
+    depositoNombre: 'Depósito sur',
+    disponible: 260,
+    minimo: 300,
+    sugerido: 340,
+  },
+]
+
+/**
+ * Cuándo corrió por última vez el job `stock.reconciliation`.
+ *
+ * El resultado no se guarda: la ventana de conciliación lo **calcula** con
+ * `conciliar(niveles, movimientos)`, la misma función pura que corre el backend. Así
+ * el día que el motor reporte de verdad, la pantalla no cambia.
+ */
+export const conciliacionEjecutadaEn = '2026-09-20T06:00:00.000Z'
 
 /**
  * Cadena de operación de ventas (cotización → pedido → remito → factura →
