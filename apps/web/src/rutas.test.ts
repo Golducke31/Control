@@ -81,24 +81,50 @@ test('toda ventana declara un permiso, y ese permiso existe en el catálogo', ()
 })
 
 test('el catálogo de permisos refleja lo que la base tiene hoy', () => {
-  // 33 permisos en 13 recursos: el espejo de `app.permissions`. Si alguien cambia la
-  // base y no esto —o al revés—, el número lo delata.
-  assert.equal(PERMISOS_SEMBRADOS.length, 33)
-  assert.equal(new Set(PERMISOS_SEMBRADOS).size, 33, 'hay permisos sembrados repetidos')
+  // 51 permisos en 16 recursos: el espejo de `app.permissions`. Si alguien cambia la
+  // base y no esto —o al revés—, el número lo delata. `tools/check-permissions.mjs`
+  // además cruza las dos listas contra el catálogo SQL en los dos sentidos.
+  assert.equal(PERMISOS_SEMBRADOS.length, 51)
+  assert.equal(new Set(PERMISOS_SEMBRADOS).size, 51, 'hay permisos sembrados repetidos')
 })
 
-test('los permisos pendientes son los que el RBAC todavía no cubre', () => {
-  // Cuatro módulos sin permiso propio: compras, tesorería, contabilidad, fiscal, más
-  // tareas. Es el hueco que cierra la migración 0026.
-  assert.ok(PERMISOS_PENDIENTES.length > 0, 'si no hay pendientes, la migración 0026 ya corrió y hay que mover esta lista')
-  const recursos = new Set(PERMISOS_PENDIENTES.map((p) => p.split('.')[0]))
-  assert.deepEqual(
-    [...recursos].sort(),
-    ['accounting', 'fiscal', 'ops', 'purchasing', 'treasury'],
-  )
-  // Y ningún permiso puede estar en las dos listas.
-  const solapados = PERMISOS_PENDIENTES.filter((p) => (PERMISOS_SEMBRADOS as readonly string[]).includes(p))
-  assert.deepEqual(solapados, [], `permisos en ambas listas: ${solapados.join(', ')}`)
+test('no quedan permisos pendientes: la fase F6 cerró el hueco del RBAC', () => {
+  // Un arreglo no vacío significa «una fase declaró un permiso que la base todavía no
+  // siembra»: es un estado de obra, no un defecto. Con las catorce ventanas cubiertas,
+  // la lista tiene que estar vacía. Si vuelve a tener entradas, es una fase en curso.
+  assert.deepEqual([...PERMISOS_PENDIENTES], [])
+})
+
+test('los 16 recursos del mapa están cubiertos por el catálogo', () => {
+  const recursos = new Set(PERMISOS_SEMBRADOS.map((p) => p.split('.')[0]))
+  assert.deepEqual([...recursos].sort(), [
+    'accounting',
+    'audit',
+    'billing',
+    'catalog',
+    'customers',
+    'fiscal',
+    'inventory',
+    'logistics',
+    'ops',
+    'payments',
+    'purchasing',
+    'reports',
+    'sales',
+    'team',
+    'tenant',
+    'treasury',
+  ])
+})
+
+test('cada permiso sembrado respeta resource.action', () => {
+  // El espejo de la comprobación que hace `app.assert_permissions_covered()` en la
+  // base: un código con la forma equivocada no lo encuentra nadie.
+  const rotos = PERMISOS_SEMBRADOS.filter((p) => {
+    const partes = p.split('.')
+    return partes.length !== 2 || partes.some((parte) => parte.trim() === '')
+  })
+  assert.deepEqual(rotos, [])
 })
 
 test('cada ventana declarada tiene su archivo de página', () => {

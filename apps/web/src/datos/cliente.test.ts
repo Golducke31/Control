@@ -10,6 +10,11 @@ import {
   DepositoListadoSchema,
   TransferenciaListadoSchema,
   ReposicionListadoSchema,
+  AsientoListadoSchema,
+  DeterminacionIvaSchema,
+  MovimientoTesoreriaListadoSchema,
+  OrdenCompraListadoSchema,
+  PeriodoListadoSchema,
 } from '@control/contracts'
 
 const cliente = new SimuladoCliente()
@@ -224,4 +229,120 @@ test('confirmarTransferencia con la versión vigente despacha y mueve el saldo d
     (origenAntes?.cantidad ?? 0) - item.cantidadEnviada,
     'el saldo del origen bajó lo que salió',
   )
+})
+
+// ---------------------------------------------------------------------------
+// Finanzas (F6). Las lecturas primero otra vez: las escrituras de más abajo mutan
+// el almacén de períodos.
+// ---------------------------------------------------------------------------
+
+test('listarOrdenesCompra valida en la frontera y trae los seis estados del motor', async () => {
+  const r = await cliente.listarOrdenesCompra({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.deepEqual(OrdenCompraListadoSchema.parse(r), r)
+  assert.ok(r.items.length > 0)
+  // Toda orden aprobada o recibida registra su aprobación (espeja po_approval_recorded).
+  for (const o of r.items) {
+    if (['approved', 'partially_received', 'received'].includes(o.estado)) {
+      assert.notEqual(o.aprobadaEn, null, `${o.numero} sin registro de aprobación`)
+    }
+  }
+})
+
+test('listarMovimientosTesoreria valida y filtra por cuenta', async () => {
+  const r = await cliente.listarMovimientosTesoreria({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.deepEqual(MovimientoTesoreriaListadoSchema.parse(r), r)
+  const filtrado = await cliente.listarMovimientosTesoreria({
+    empresaSlug: 'andes',
+    texto: 'banco río',
+    pagina: 1,
+    porPagina: 50,
+  })
+  assert.ok(filtrado.paginacion.total < r.paginacion.total)
+  assert.ok(filtrado.items.every((m) => m.cuentaNombre.toLowerCase().includes('banco río')))
+})
+
+test('listarAsientos valida y respeta la partida doble de los datos simulados', async () => {
+  const r = await cliente.listarAsientos({ empresaSlug: 'andes', pagina: 1, porPagina: 500 })
+  assert.deepEqual(AsientoListadoSchema.parse(r), r)
+  const debito = r.items.reduce((s, a) => s + a.debito, 0)
+  const credito = r.items.reduce((s, a) => s + a.credito, 0)
+  assert.equal(debito, credito, 'los asientos simulados cierran por partida doble')
+})
+
+test('listarPeriodos valida y trae cerrado, abierto y reabierto', async () => {
+  const r = await cliente.listarPeriodos({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.deepEqual(PeriodoListadoSchema.parse(r), r)
+  assert.ok(r.items.some((p) => p.estado === 'closed'))
+  assert.ok(r.items.some((p) => p.estado === 'open'))
+  assert.ok(r.items.some((p) => p.reabiertoEn !== null))
+})
+
+test('obtenerDeterminacionIva refleja el período pedido y valida', async () => {
+  const r = await cliente.obtenerDeterminacionIva('andes', '2026-08')
+  assert.deepEqual(DeterminacionIvaSchema.parse(r), r)
+  assert.equal(r.periodo, '2026-08')
+  assert.equal(r.saldoTecnico, r.ivaDebito - r.ivaCredito, 'el saldo técnico sale de los dos componentes')
+})
+
+test('cerrarPeriodo rechaza un período con asientos en borrador', async () => {
+  const lista = await cliente.listarPeriodos({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const conPendientes = lista.items.find((p) => p.estado === 'open' && p.asientosPendientes > 0)
+  assert.ok(conPendientes !== undefined, 'hay un período con asientos pendientes para probar')
+  if (conPendientes === undefined) return
+
+  const r = await cliente.cerrarPeriodo({ empresaSlug: 'andes', periodo: conPendientes, autor: 'Ana Dueña' })
+  assert.equal(r.ok, false)
+  if (r.ok) return
+  assert.equal(r.motivo, 'asientos_pendientes')
+
+  const despues = await cliente.listarPeriodos({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.equal(despues.items.find((p) => p.id === conPendientes.id)?.estado, 'open', 'sigue abierto')
+})
+
+test('cerrarPeriodo cierra el que no tiene pendientes, y el cierre se ve en la lectura siguiente', async () => {
+  const lista = await cliente.listarPeriodos({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const limpio = lista.items.find((p) => p.estado === 'open' && p.asientosPendientes === 0)
+  assert.ok(limpio !== undefined)
+  if (limpio === undefined) return
+
+  const r = await cliente.cerrarPeriodo({ empresaSlug: 'andes', periodo: limpio, autor: 'Ana Dueña' })
+  assert.equal(r.ok, true)
+  if (!r.ok) return
+  assert.equal(r.periodo.estado, 'closed')
+  assert.equal(r.periodo.cerradoPor, 'Ana Dueña')
+  assert.notEqual(r.periodo.cerradoEn, null, 'closed y cerradoEn van juntos')
+
+  const despues = await cliente.listarPeriodos({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const actualizado = despues.items.find((p) => p.id === limpio.id)
+  assert.equal(actualizado?.estado, 'closed', 'la escritura se ve en la lectura siguiente')
+})
+
+test('reabrirPeriodo exige motivo y deja el rastro', async () => {
+  const lista = await cliente.listarPeriodos({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  const cerrado = lista.items.find((p) => p.estado === 'closed')
+  assert.ok(cerrado !== undefined)
+  if (cerrado === undefined) return
+
+  const sinMotivo = await cliente.reabrirPeriodo({
+    empresaSlug: 'andes',
+    periodo: cerrado,
+    autor: 'Ana Dueña',
+    motivo: '   ',
+  })
+  assert.equal(sinMotivo.ok, false)
+  if (sinMotivo.ok) return
+  assert.equal(sinMotivo.motivo, 'motivo_requerido')
+
+  const conMotivo = await cliente.reabrirPeriodo({
+    empresaSlug: 'andes',
+    periodo: cerrado,
+    autor: 'Ana Dueña',
+    motivo: 'Faltó imputar un flete',
+  })
+  assert.equal(conMotivo.ok, true)
+  if (!conMotivo.ok) return
+  assert.equal(conMotivo.periodo.estado, 'open')
+  assert.equal(conMotivo.periodo.cerradoEn, null, 'el cierre anterior se limpia')
+  assert.equal(conMotivo.periodo.motivoReapertura, 'Faltó imputar un flete')
+  assert.equal(conMotivo.periodo.reabiertoPor, 'Ana Dueña')
 })

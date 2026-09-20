@@ -1,36 +1,53 @@
 import type {
   AccionTransferencia,
+  AsientoListado,
   Conciliacion,
+  CuentaTesoreriaListado,
   DepositoListado,
+  DeterminacionIva,
   DocumentoVentaListado,
   FacturacionListado,
   MovimientoStock,
   MovimientoStockListado,
+  MovimientoTesoreriaListado,
   NivelStock,
   NivelStockListado,
   Orden,
+  OrdenCompraListado,
   PanelResumen,
+  Periodo,
+  PeriodoListado,
   ProductoListado,
   ReposicionListado,
+  ResultadoCierre,
   ResultadoRecuento,
+  ResultadoReapertura,
   ResultadoTransferencia,
   TransferenciaListado,
 } from '@control/contracts'
 import {
+  AsientoListadoSchema,
   ConciliacionSchema,
+  CuentaTesoreriaListadoSchema,
   DepositoListadoSchema,
+  DeterminacionIvaSchema,
   DocumentoVentaListadoSchema,
   FacturacionListadoSchema,
   MovimientoStockListadoSchema,
+  MovimientoTesoreriaListadoSchema,
   NivelStockListadoSchema,
+  OrdenCompraListadoSchema,
   PanelResumenSchema,
+  PeriodoListadoSchema,
   ProductoListadoSchema,
   ReposicionListadoSchema,
   TransferenciaListadoSchema,
   aplicarRecuento,
   aplicarTransferencia,
+  cerrarPeriodo as cerrarPeriodoPuro,
   conciliar,
   deltaDeMovimiento,
+  reabrirPeriodo as reabrirPeriodoPuro,
 } from '@control/contracts'
 import {
   productos,
@@ -43,6 +60,12 @@ import {
   documentosVenta,
   panelResumen,
   comprobantes,
+  ordenesCompra,
+  cuentasTesoreria,
+  movimientosTesoreria,
+  asientos,
+  periodos,
+  determinacionIva,
 } from '@control/contracts/fixtures'
 
 /** Parámetros comunes de una consulta de lista. */
@@ -89,6 +112,28 @@ export interface ApiClient {
     accion: AccionTransferencia
     versionEsperada: string
   }): Promise<ResultadoTransferencia>
+
+  // --- Finanzas (F6) ---
+  listarOrdenesCompra(p: ParametrosLista): Promise<OrdenCompraListado>
+  listarCuentasTesoreria(p: ParametrosLista): Promise<CuentaTesoreriaListado>
+  listarMovimientosTesoreria(p: ParametrosLista): Promise<MovimientoTesoreriaListado>
+  listarAsientos(p: ParametrosLista): Promise<AsientoListado>
+  listarPeriodos(p: ParametrosLista): Promise<PeriodoListado>
+  /** Determinación de IVA del período (objeto único). */
+  obtenerDeterminacionIva(empresaSlug: string, periodo: string): Promise<DeterminacionIva>
+  /** Cierra un período. Rechaza si quedan asientos en borrador. */
+  cerrarPeriodo(p: {
+    empresaSlug: string
+    periodo: Periodo
+    autor: string
+  }): Promise<ResultadoCierre>
+  /** Reabre un período cerrado. Exige motivo: una reapertura sin registro es lo que el ADR impide. */
+  reabrirPeriodo(p: {
+    empresaSlug: string
+    periodo: Periodo
+    autor: string
+    motivo: string
+  }): Promise<ResultadoReapertura>
 }
 
 /** Pequeño motor de consulta en memoria sobre los fixtures. */
@@ -141,6 +186,7 @@ const almacen = {
   niveles: [...niveles],
   movimientos: [...movimientos],
   transferencias: [...transferencias],
+  periodos: [...periodos],
 }
 
 /**
@@ -376,6 +422,132 @@ export class SimuladoCliente implements ApiClient {
     aplicarAlSaldo(resultado.movimientos)
     return resultado
   }
+
+  // --- Finanzas (F6) ---
+
+  async listarOrdenesCompra(p: ParametrosLista): Promise<OrdenCompraListado> {
+    const r = consultar(
+      ordenesCompra,
+      p,
+      (x) => `${x.numero} ${x.proveedor} ${x.estado}`,
+      (x, campo) => {
+        if (campo === 'numero' || campo === 'proveedor' || campo === 'estado' || campo === 'total' || campo === 'fecha')
+          return x[campo]
+        return undefined
+      },
+    )
+    return OrdenCompraListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarCuentasTesoreria(p: ParametrosLista): Promise<CuentaTesoreriaListado> {
+    const r = consultar(
+      cuentasTesoreria,
+      p,
+      (x) => `${x.nombre} ${x.tipo}`,
+      (x, campo) => {
+        if (campo === 'nombre' || campo === 'saldo') return x[campo]
+        if (campo === 'tipo') return x.tipo
+        return undefined
+      },
+    )
+    return CuentaTesoreriaListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarMovimientosTesoreria(p: ParametrosLista): Promise<MovimientoTesoreriaListado> {
+    const r = consultar(
+      movimientosTesoreria,
+      p,
+      (x) => `${x.descripcion} ${x.cuentaNombre} ${x.tipo}`,
+      (x, campo) => {
+        if (campo === 'fecha' || campo === 'monto' || campo === 'tipo' || campo === 'cuentaNombre') return x[campo]
+        return undefined
+      },
+    )
+    return MovimientoTesoreriaListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarAsientos(p: ParametrosLista): Promise<AsientoListado> {
+    const r = consultar(
+      asientos,
+      p,
+      (x) => `${x.numero} ${x.descripcion} ${x.origen} ${x.periodoNombre}`,
+      (x, campo) => {
+        if (campo === 'numero' || campo === 'fecha' || campo === 'origen' || campo === 'debito' || campo === 'credito')
+          return x[campo]
+        return undefined
+      },
+    )
+    return AsientoListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarPeriodos(p: ParametrosLista): Promise<PeriodoListado> {
+    const r = consultar(
+      almacen.periodos,
+      p,
+      (x) => `${x.nombre} ${x.estado}`,
+      (x, campo) => {
+        if (campo === 'nombre' || campo === 'estado') return x[campo]
+        if (campo === 'numero') return x.numero
+        return undefined
+      },
+    )
+    return PeriodoListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async obtenerDeterminacionIva(empresaSlug: string, periodo: string): Promise<DeterminacionIva> {
+    return DeterminacionIvaSchema.parse({ ...determinacionIva, periodo })
+  }
+
+  async cerrarPeriodo(p: { empresaSlug: string; periodo: Periodo; autor: string }): Promise<ResultadoCierre> {
+    const i = almacen.periodos.findIndex((x) => x.id === p.periodo.id)
+    const actual = i === -1 ? p.periodo : almacen.periodos[i]
+    if (actual === undefined) return { ok: false, motivo: 'ya_cerrado' }
+
+    // Los asientos pendientes salen del propio período: es el dato que impide cerrar.
+    const resultado = cerrarPeriodoPuro(actual, {
+      fecha: new Date().toISOString(),
+      autor: p.autor,
+      asientosPendientes: actual.asientosPendientes,
+    })
+    if (!resultado.ok) return resultado
+    if (i !== -1) almacen.periodos[i] = resultado.periodo
+    return resultado
+  }
+
+  async reabrirPeriodo(p: {
+    empresaSlug: string
+    periodo: Periodo
+    autor: string
+    motivo: string
+  }): Promise<ResultadoReapertura> {
+    const i = almacen.periodos.findIndex((x) => x.id === p.periodo.id)
+    const actual = i === -1 ? p.periodo : almacen.periodos[i]
+    if (actual === undefined) return { ok: false, motivo: 'no_esta_cerrado' }
+
+    const resultado = reabrirPeriodoPuro(actual, {
+      fecha: new Date().toISOString(),
+      autor: p.autor,
+      motivo: p.motivo,
+    })
+    if (!resultado.ok) return resultado
+    if (i !== -1) almacen.periodos[i] = resultado.periodo
+    return resultado
+  }
 }
 
 /**
@@ -450,6 +622,37 @@ export class HttpCliente implements ApiClient {
   }
   async confirmarTransferencia(): Promise<ResultadoTransferencia> {
     throw new Error('confirmarTransferencia sobre HTTP llega con el backend (F9); usá NEXT_PUBLIC_API_MODE=simulado')
+  }
+
+  listarOrdenesCompra(p: ParametrosLista): Promise<OrdenCompraListado> {
+    return this.pedir('/compras/ordenes', p, OrdenCompraListadoSchema)
+  }
+  listarCuentasTesoreria(p: ParametrosLista): Promise<CuentaTesoreriaListado> {
+    return this.pedir('/tesoreria/cuentas', p, CuentaTesoreriaListadoSchema)
+  }
+  listarMovimientosTesoreria(p: ParametrosLista): Promise<MovimientoTesoreriaListado> {
+    return this.pedir('/tesoreria/movimientos', p, MovimientoTesoreriaListadoSchema)
+  }
+  listarAsientos(p: ParametrosLista): Promise<AsientoListado> {
+    return this.pedir('/contabilidad/asientos', p, AsientoListadoSchema)
+  }
+  listarPeriodos(p: ParametrosLista): Promise<PeriodoListado> {
+    return this.pedir('/contabilidad/periodos', p, PeriodoListadoSchema)
+  }
+  obtenerDeterminacionIva(empresaSlug: string, periodo: string): Promise<DeterminacionIva> {
+    return this.pedir(
+      `/fiscal/determinacion/${encodeURIComponent(periodo)}`,
+      { empresaSlug, pagina: 1, porPagina: 1, orden: null },
+      DeterminacionIvaSchema,
+    )
+  }
+
+  /** Las dos escrituras de contabilidad: mismo criterio que las de inventario. */
+  async cerrarPeriodo(): Promise<ResultadoCierre> {
+    throw new Error('cerrarPeriodo sobre HTTP llega con el backend (F9); usá NEXT_PUBLIC_API_MODE=simulado')
+  }
+  async reabrirPeriodo(): Promise<ResultadoReapertura> {
+    throw new Error('reabrirPeriodo sobre HTTP llega con el backend (F9); usá NEXT_PUBLIC_API_MODE=simulado')
   }
 }
 

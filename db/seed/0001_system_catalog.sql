@@ -1,6 +1,18 @@
 -- =============================================================================
 -- Control · seed · Permisos RBAC, roles de sistema y plantillas de UI
 -- =============================================================================
+--
+-- Este archivo es el catálogo de permisos y **la vía de upgrade de los permisos**.
+-- Todo inserta con `ON CONFLICT DO NOTHING`, así que volver a ejecutarlo agrega lo
+-- nuevo sin tocar lo existente. Es a propósito: las migraciones corren ANTES que
+-- este seed, y en una base nueva `app.roles` todavía está vacía cuando corren. Un
+-- `INSERT INTO app.role_permissions` dentro de una migración no fallaría —no
+-- insertaría ninguna fila, porque el `SELECT` sobre los roles de sistema no
+-- devolvería nada— y el permiso quedaría sin asignar en silencio. Por eso los
+-- permisos se siembran acá y la migración `0026` sólo aporta la aserción.
+--
+-- Al agregar permisos nuevos hay que re-ejecutar este archivo, y la aserción del
+-- final avisa si algo quedó sin asignar.
 
 BEGIN;
 
@@ -49,7 +61,30 @@ INSERT INTO app.permissions (code, resource, action, description) VALUES
   -- Reportes y auditoría
   ('reports.export',         'reports',   'export',          'Exportar a XLSX/PDF'),
   ('reports.financial',      'reports',   'financial',       'Acceder a reportes financieros'),
-  ('audit.read',             'audit',     'read',            'Consultar la bitácora de auditoría')
+  ('audit.read',             'audit',     'read',            'Consultar la bitácora de auditoría'),
+  -- Compras y proveedores (F6)
+  ('purchasing.read',        'purchasing','read',            'Ver proveedores y órdenes de compra'),
+  ('purchasing.write',       'purchasing','write',           'Crear y editar órdenes de compra'),
+  ('purchasing.receive',     'purchasing','receive',         'Recibir mercadería contra una orden'),
+  ('purchasing.pay',         'purchasing','pay',             'Registrar pagos a proveedores'),
+  -- Tesorería (F6)
+  ('treasury.read',          'treasury',  'read',            'Ver cuentas, movimientos y cheques'),
+  ('treasury.write',         'treasury',  'write',           'Registrar cobros, pagos y movimientos'),
+  ('treasury.reconcile',     'treasury',  'reconcile',       'Conciliar extractos bancarios'),
+  ('treasury.checks',        'treasury',  'checks',          'Administrar la cartera de cheques'),
+  -- Contabilidad (F6)
+  ('accounting.read',        'accounting','read',            'Consultar el libro diario y los balances'),
+  ('accounting.post',        'accounting','post',            'Contabilizar asientos'),
+  ('accounting.close',       'accounting','close',           'Cerrar y reabrir períodos'),
+  ('accounting.manage_accounts','accounting','manage_accounts','Administrar el plan de cuentas y las reglas'),
+  -- Fiscal (F6)
+  ('fiscal.read',            'fiscal',    'read',            'Consultar la posición fiscal'),
+  ('fiscal.determine',       'fiscal',    'determine',       'Determinar el IVA de un período'),
+  ('fiscal.withholdings',    'fiscal',    'withholdings',    'Administrar retenciones y percepciones'),
+  ('fiscal.manage_rates',    'fiscal',    'manage_rates',    'Administrar alícuotas y libros fiscales'),
+  -- Tareas programadas (F8)
+  ('ops.read',               'ops',       'read',            'Ver las tareas programadas y su historial'),
+  ('ops.run',                'ops',       'run',             'Ejecutar y reprogramar tareas')
 ON CONFLICT (code) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -118,6 +153,46 @@ SELECT '11111111-1111-1111-1111-000000000007', code FROM (VALUES
 ) AS t(code) ON CONFLICT DO NOTHING;
 
 -- -----------------------------------------------------------------------------
+-- Mapeo rol -> permisos de los módulos de F6 (compras, tesorería, contabilidad,
+-- fiscal) y de tareas programadas.
+-- -----------------------------------------------------------------------------
+-- `owner` y `admin` NO se repiten acá: sus bloques de arriba asignan
+-- `SELECT code FROM app.permissions`, así que al re-ejecutar el seed —que es
+-- idempotente— ya toman los códigos nuevos. Repetirlos sería una segunda lista
+-- que se desactualiza en silencio.
+
+-- accountant: los cuatro módulos financieros completos, más lo que necesita para
+-- pagar y conciliar. Es el rol que cierra el período.
+INSERT INTO app.role_permissions (role_id, permission_code)
+SELECT '11111111-1111-1111-1111-000000000003', code FROM (VALUES
+  ('accounting.read'), ('accounting.post'), ('accounting.close'), ('accounting.manage_accounts'),
+  ('fiscal.read'), ('fiscal.determine'), ('fiscal.withholdings'), ('fiscal.manage_rates'),
+  ('purchasing.read'), ('purchasing.pay'),
+  ('treasury.read'), ('treasury.reconcile')
+) AS t(code) ON CONFLICT DO NOTHING;
+
+-- warehouse: recibe mercadería contra una orden. Lo recibido es lo que entra al
+-- stock, así que el permiso de recepción es de depósito, no de administración.
+INSERT INTO app.role_permissions (role_id, permission_code)
+SELECT '11111111-1111-1111-1111-000000000004', code FROM (VALUES
+  ('purchasing.read'), ('purchasing.receive')
+) AS t(code) ON CONFLICT DO NOTHING;
+
+-- sales: consulta de tesorería, para saber si entró un cobro.
+INSERT INTO app.role_permissions (role_id, permission_code)
+SELECT '11111111-1111-1111-1111-000000000005', code FROM (VALUES
+  ('treasury.read')
+) AS t(code) ON CONFLICT DO NOTHING;
+
+-- viewer: lectura de los cuatro módulos nuevos, sin ninguna escritura.
+INSERT INTO app.role_permissions (role_id, permission_code)
+SELECT '11111111-1111-1111-1111-000000000007', code FROM (VALUES
+  ('accounting.read'), ('fiscal.read'), ('purchasing.read'), ('treasury.read')
+) AS t(code) ON CONFLICT DO NOTHING;
+
+-- driver no suma nada: su alcance sigue siendo el tracking y las entregas.
+
+-- -----------------------------------------------------------------------------
 -- Plantillas de UI por rubro
 -- -----------------------------------------------------------------------------
 INSERT INTO app.ui_templates (key, name, vertical, description, default_config) VALUES
@@ -151,5 +226,14 @@ INSERT INTO app.ui_templates (key, name, vertical, description, default_config) 
      "kpis":["sales_today","stock_value","shipments_active","pending_invoices"],
      "charts":["sales_timeline","stock_evolution","delivery_funnel"]}'::jsonb)
 ON CONFLICT (key) DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- Aserción: el catálogo tiene que estar completo y asignado.
+-- -----------------------------------------------------------------------------
+-- Se ejecuta al final del seed, cuando ya están los permisos Y las asignaciones.
+-- No se ejecuta dentro de la migración `0026` que la define: ahí los roles de
+-- sistema todavía no existen y `owner` no tendría los permisos nuevos, así que
+-- fallaría siempre en una base nueva. Acá, en cambio, es una comprobación real.
+SELECT app.assert_permissions_covered();
 
 COMMIT;

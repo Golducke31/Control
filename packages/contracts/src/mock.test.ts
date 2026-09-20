@@ -8,6 +8,15 @@ import {
   TransferenciaSchema,
 } from './stock.ts'
 import { DocumentoVentaSchema } from './ventas.ts'
+import {
+  FacturaCompraSchema,
+  OrdenCompraSchema,
+  PagoProveedorSchema,
+  RecepcionSchema,
+} from './compras.ts'
+import { ChequeSchema, CuentaTesoreriaSchema, MovimientoTesoreriaSchema } from './tesoreria.ts'
+import { AsientoSchema, PeriodoSchema } from './contabilidad.ts'
+import { AlicuotaSchema, DeterminacionIvaSchema, RetencionSchema } from './fiscal.ts'
 import { MiembroSchema } from './gobierno.ts'
 import {
   productos,
@@ -17,6 +26,18 @@ import {
   transferencias,
   reposicion,
   documentosVenta,
+  ordenesCompra,
+  recepciones,
+  facturasCompra,
+  pagosProveedor,
+  cuentasTesoreria,
+  movimientosTesoreria,
+  cheques,
+  asientos,
+  periodos,
+  alicuotas,
+  determinacionIva,
+  retenciones,
   miembros,
   auditoria,
   tareas,
@@ -140,5 +161,39 @@ test('la reposición sugiere al menos lo que falta para llegar al mínimo', () =
       r.sugerido >= r.minimo - r.disponible,
       `${r.sku} sugiere ${r.sugerido}, menos de lo que falta (${r.minimo - r.disponible})`,
     )
+  }
+})
+
+test('los fixtures de finanzas validan contra sus esquemas', () => {
+  for (const o of ordenesCompra) OrdenCompraSchema.parse(o)
+  for (const r of recepciones) RecepcionSchema.parse(r)
+  for (const f of facturasCompra) FacturaCompraSchema.parse(f)
+  for (const p of pagosProveedor) PagoProveedorSchema.parse(p)
+  for (const c of cuentasTesoreria) CuentaTesoreriaSchema.parse(c)
+  for (const m of movimientosTesoreria) MovimientoTesoreriaSchema.parse(m)
+  for (const c of cheques) ChequeSchema.parse(c)
+  for (const a of asientos) AsientoSchema.parse(a)
+  for (const p of periodos) PeriodoSchema.parse(p)
+  for (const a of alicuotas) AlicuotaSchema.parse(a)
+  for (const r of retenciones) RetencionSchema.parse(r)
+  DeterminacionIvaSchema.parse(determinacionIva)
+})
+
+test('una orden aprobada o recibida siempre registra quién aprobó (espeja po_approval_recorded)', () => {
+  // Sin esto, «aprobada» es un estado que cualquiera escribe sin haber aprobado nada,
+  // y la aprobación por monto deja de ser un control.
+  for (const o of ordenesCompra) {
+    if (['approved', 'partially_received', 'received'].includes(o.estado)) {
+      assert.notEqual(o.aprobadaEn, null, `${o.numero} está en ${o.estado} sin registrar la aprobación`)
+    } else {
+      assert.equal(o.aprobadaEn, null, `${o.numero} está en ${o.estado} y no debería tener aprobación`)
+    }
+  }
+})
+
+test('una factura de compra no puede tener pagado más que su total', () => {
+  for (const f of facturasCompra) {
+    assert.ok(f.pagado <= f.total, `${f.numero}: pagado ${f.pagado} > total ${f.total}`)
+    if (f.estado === 'paid') assert.equal(f.pagado, f.total, `${f.numero} dice pagada sin estarlo`)
   }
 })

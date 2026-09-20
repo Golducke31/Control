@@ -9,7 +9,7 @@
 - [`PLAN-ERP-MULTIEMPRESA.md`](PLAN-ERP-MULTIEMPRESA.md) — brechas funcionales y fases E0–E9. **Este plan se ejecuta en paralelo a E7**, no lo reemplaza.
 - `prototype/index.html` — prototipo de diseño que este plan reemplaza.
 
-> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos**, **F4 · Operación diaria** y **F5 · Inventario** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel** (KPIs del período), **Ventas** (la cadena completa de documentos con las transiciones válidas en la barra de acciones) y **Facturación** (comprobantes fiscales con estado de AFIP y de cobro), más la lógica pura de transiciones de la cadena. F5 entregó la ventana **Stock** completa —niveles, libro mayor, depósitos, transferencias con detalle, reposición, **recuento** y **conciliación**—, más la lógica pura de inventario (`aplicarRecuento`, `aplicarTransferencia` con bloqueo optimista, `conciliar`) y el primer camino de **escritura** del frontend sobre el adaptador simulado. Lo que sigue es **F6 · Finanzas**.
+> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos**, **F4 · Operación diaria**, **F5 · Inventario** y **F6 · Finanzas** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel**, **Ventas** y **Facturación**, más la lógica pura de transiciones de la cadena de documentos. F5 entregó la ventana **Stock** completa, la lógica pura de inventario y el primer camino de escritura del frontend. F6 entregó las ventanas **Compras**, **Tesorería**, **Contabilidad** (con **Períodos**) y **Fiscal**, la lógica pura del cierre de período, y **cerró el hueco del RBAC**: los 18 permisos que faltaban están sembrados y asignados, con una aserción en la base y un gate mecánico en `npm run verify`. Lo que sigue es **F7 · Logística**.
 >
 > Tres ajustes respecto de lo planeado, decididos al implementar y documentados donde corresponden:
 > 1. `packages/contracts` y `packages/graficos` se crean en **F3** y **F4**, con su primer consumidor real, no en F1: un paquete sin consumidor es un lastre que nadie mantiene.
@@ -587,6 +587,15 @@ Recursos existentes: `audit`, `billing`, `catalog`, `customers`, `inventory`, `l
 
 > **Nota de coherencia con el plan del ERP.** Esta migración es de datos y no toca el esquema, así que no colisiona con E7. Se numera `0026` y se coordina con la numeración de E7 en el momento de escribirla.
 
+> **Cerrado en F6.** El hueco se cerró sembrando **18** permisos —los 16 de la tabla de arriba más `ops.read` y `ops.run`, que necesita la ventana Tareas— y asignándolos a los roles de sistema. El total del catálogo pasa de 33 permisos en 13 recursos a **51 en 16 recursos**, y `PERMISOS_PENDIENTES` quedó vacía.
+>
+> Dos ajustes respecto de lo que decía este apartado, ambos por el orden de ejecución y documentados en la sección de F6:
+>
+> 1. **Los permisos y las asignaciones van en el seed, no en la migración.** Las migraciones corren antes que el seed, así que en una base nueva los roles de sistema todavía no existen y una asignación dentro de la migración no insertaría ninguna fila —sin fallar—. El seed es idempotente, así que también es la vía de upgrade. La migración `0026` aporta la aserción.
+> 2. **La aserción no se ejecuta dentro de la migración** sino al final del seed, que es el único momento en que ya hay permisos y roles y la comprobación no falla por un motivo falso.
+>
+> La comprobación cruzada —«todo recurso del mapa de rutas tiene su permiso»— se resolvió además del lado del frontend, donde el mapa vive: `tools/check-permissions.mjs` cruza `apps/web/src/rutas.ts` contra el catálogo SQL en los dos sentidos y corre en `npm run verify`, sin base de datos. Las dos comprobaciones son necesarias y ninguna reemplaza a la otra.
+
 ---
 
 ## 5. Arquitectura técnica
@@ -948,7 +957,35 @@ Catálogo (5 sub-rutas) y Stock (8 sub-rutas), incluidos recuento, transferencia
 ### F6 · Finanzas
 Compras (11), Tesorería (8), Contabilidad (7) y Fiscal (7). **Requiere la migración `0026` de permisos** (§4.7).
 
-**Puerta:** los 20 permisos nuevos sembrados y asignados; toda ventana del mapa tiene su permiso; el cierre de período se ve reflejado.
+**Alcance entregado en esta pasada.** Las cuatro ventanas raíz —**Compras** (órdenes con su registro de aprobación y su estado de recepción), **Tesorería** (movimientos con la marca de conciliado y el saldo de las cuentas en pesos), **Contabilidad** (el libro diario con débito y crédito en columnas separadas y el indicador de partida doble) y **Fiscal** (la determinación de IVA con sus dos componentes a la vista)—, más la sub-ruta **`contabilidad/periodos`**, que es donde la puerta se vuelve pantalla. La lógica pura del cierre vive en `packages/contracts/src/periodos.ts` (`admiteAsientos`, `resolverPeriodo`, `cerrarPeriodo`, `reabrirPeriodo`) con su suite.
+
+**El hueco del RBAC, cerrado.** Los 18 permisos que faltaban —`purchasing.*`, `treasury.*`, `accounting.*`, `fiscal.*` y `ops.*`— están sembrados y asignados a los roles de sistema. `PERMISOS_PENDIENTES` quedó vacía y las catorce ventanas tienen guard. Dos comprobaciones nuevas lo vigilan:
+
+- **`app.assert_permissions_covered()`** (migración `0026`), que corre en la base y falla si falta un código, si un código no respeta `resource.action`, si un rol de sistema quedó sin permisos, o si `owner` no tiene todos. La llama el seed al terminar.
+- **`tools/check-permissions.mjs`** (`npm run verify:permissions`), que cruza el mapa de rutas del frontend contra el catálogo SQL **en los dos sentidos**. Es la puerta «toda ventana del mapa tiene su permiso», hecha mecánica y sin base de datos.
+
+**Tres correcciones respecto de lo planeado**, todas verificadas contra el repositorio:
+
+1. **El conteo de permisos.** §4.7 listaba 16 (cuatro módulos × cuatro permisos), la puerta de esta sección decía 20 y `rutas.ts` declaraba 18 (los 16 más `ops.read` y `ops.run`, que son de la ventana Tareas). El número real es **18**, y son los que se sembraron: dejar `ops.*` afuera habría dejado la ventana Tareas sin guard y la puerta sin cumplir. El total del catálogo pasa de 33 a **51 permisos en 16 recursos**.
+2. **La migración `0026` no siembra los permisos ni los asigna.** Las migraciones corren **antes** que el seed, así que en una base nueva `app.roles` todavía está vacía: un `INSERT INTO app.role_permissions` en la migración no fallaría, **no insertaría ninguna fila**, y el permiso quedaría sin asignar en silencio — el mismo modo de falla que `0012` documenta en `assert_period_open()`. Los permisos y las asignaciones van en el seed, que es idempotente y por lo tanto también es la vía de upgrade; la migración aporta la aserción. El seed la ejecuta al final, cuando ya hay permisos y roles: dentro de la migración fallaría siempre, por un motivo falso.
+3. **`fiscal` consume la determinación, no los comprobantes.** El catálogo de endpoints (§12) declaraba `GET /fiscal/comprobantes` para la ventana; lo que la ventana muestra es la **determinación de IVA** del período, así que su contrato es `GET /fiscal/determinacion`.
+
+**Puerta:** los 18 permisos nuevos sembrados y asignados; toda ventana del mapa tiene su permiso; el cierre de período se ve reflejado.
+
+| Criterio de la puerta | Evidencia | Resultado |
+| --- | --- | --- |
+| Los permisos nuevos están sembrados | `db/seed/0001_system_catalog.sql` (18 códigos) + `app.assert_permissions_covered()` | ✅ |
+| …y asignados a los roles de sistema | `owner` todos, `admin` todos menos las dos exclusiones documentadas, `accountant` los financieros, `warehouse` las recepciones, `sales`/`viewer` sólo lectura | ✅ |
+| Toda ventana del mapa tiene su permiso | `tools/check-permissions.mjs` cruza `rutas.ts` × catálogo SQL en los dos sentidos; `PERMISOS_PENDIENTES` vacía | ✅ |
+| El gate nuevo **puede fallar** | Se inyectó un permiso inexistente y devolvió 1 con el mensaje correcto; después se revirtió | ✅ |
+| El cierre de período se ve reflejado | Después de `cerrarPeriodo`, `resolverPeriodo` sobre la misma fecha devuelve `periodo_cerrado` (PUERTA F6·3); la ventana deshabilita el botón con la misma función pura | ✅ |
+| `closing` sigue aceptando asientos | `admiteAsientos` sólo rechaza `closed`: tratarlo como cerrado haría imposible cerrar el mes | ✅ |
+| Reabrir exige motivo y deja rastro | Espeja `periods_reopen_coherent`; la reapertura limpia el cierre anterior y no lo pisa | ✅ |
+| La partida doble se ve | `Contabilidad` muestra débito y crédito en columnas separadas y compara los totales completos | ✅ |
+
+**Verificación mecánica.** `npm run verify` en verde (8 validadores, incluido `verify:permissions`); typecheck de 5 workspaces; `node --test` en `packages/contracts` (**70**) y `apps/web` (**67**) en verde; `next build` de `@control/web` exitoso.
+
+**Alcance movido.** Las 33 sub-rutas de detalle de las cuatro ventanas (proveedores, órdenes nuevas, recepciones, facturas de compra, pagos, cuentas, cheques, conciliaciones bancarias, plan de cuentas, asientos, alícuotas, retenciones, libros, credenciales AFIP) quedan como seguimiento dentro de F6: son listados y formularios que no tocan las reglas de su puerta. `contabilidad/periodos` sí entró porque **es** la puerta.
 
 ### F7 · Logística
 Torre de control con mapa en vivo por SSE, Envíos, Flota, Incidencias, POD, tracking público y la PWA de conductor.

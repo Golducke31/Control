@@ -1,17 +1,30 @@
+import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { getCliente } from '@/datos/cliente'
+import { FiscalCliente } from './FiscalCliente'
 
-import { VentanaPendiente } from '@/componentes/VentanaPendiente'
-import { ventanaPorId } from '@/rutas'
+export const metadata: Metadata = { title: 'Fiscal' }
+
+/** El período que se muestra por defecto: el mes en curso, en formato `YYYY-MM`. */
+function periodoActual(): string {
+  return new Date().toISOString().slice(0, 7)
+}
 
 /**
- * La ventana se declara en el mapa de rutas, con su permiso, su grupo y sus subrutas.
- * El contenido llega en la fase que el mapa indica; hasta entonces esta página muestra
- * lo que el mapa dice de ella, para que la arquitectura sea verificable a simple vista.
+ * Fiscal (F6).
+ *
+ * Server Component: resuelve la determinación de IVA del período en curso y la pasa
+ * ya calculada. La sub-ruta `determinacion` es la que permitirá elegir otro período;
+ * acá se muestra el que corresponde por defecto.
  */
-const ventana = ventanaPorId('fiscal')
+export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const periodo = periodoActual()
+  const inicial = await getCliente().obtenerDeterminacionIva(slug, periodo)
 
-export const metadata: Metadata = { title: ventana.titulo }
-
-export default function Pagina() {
-  return <VentanaPendiente ventana={ventana} />
+  return (
+    <Suspense>
+      <FiscalCliente slug={slug} periodo={periodo} inicial={inicial} />
+    </Suspense>
+  )
 }

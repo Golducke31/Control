@@ -1,17 +1,39 @@
+import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { getCliente } from '@/datos/cliente'
+import { ContabilidadCliente } from './ContabilidadCliente'
+import type { ResumenContable } from './ContabilidadCliente'
 
-import { VentanaPendiente } from '@/componentes/VentanaPendiente'
-import { ventanaPorId } from '@/rutas'
+export const metadata: Metadata = { title: 'Contabilidad' }
 
 /**
- * La ventana se declara en el mapa de rutas, con su permiso, su grupo y sus subrutas.
- * El contenido llega en la fase que el mapa indica; hasta entonces esta página muestra
- * lo que el mapa dice de ella, para que la arquitectura sea verificable a simple vista.
+ * Contabilidad (F6).
+ *
+ * El resumen de partida doble se calcula sobre **todos** los asientos, no sobre la
+ * página: es la comprobación que tiene que valer para el libro entero.
  */
-const ventana = ventanaPorId('contabilidad')
+export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const cliente = getCliente()
 
-export const metadata: Metadata = { title: ventana.titulo }
+  const [inicial, todos] = await Promise.all([
+    cliente.listarAsientos({ empresaSlug: slug, pagina: 1, porPagina: 10 }),
+    cliente.listarAsientos({ empresaSlug: slug, pagina: 1, porPagina: 500 }),
+  ])
 
-export default function Pagina() {
-  return <VentanaPendiente ventana={ventana} />
+  const debito = todos.items.reduce((suma, a) => suma + a.debito, 0)
+  const credito = todos.items.reduce((suma, a) => suma + a.credito, 0)
+
+  const resumen: ResumenContable = {
+    asientos: todos.paginacion.total,
+    debito,
+    credito,
+    partidaDoble: debito === credito,
+  }
+
+  return (
+    <Suspense>
+      <ContabilidadCliente slug={slug} initialData={inicial} resumen={resumen} />
+    </Suspense>
+  )
 }

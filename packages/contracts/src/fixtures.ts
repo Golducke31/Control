@@ -7,6 +7,10 @@ import type { MovimientoStock } from './stock.ts'
 import type { Reposicion } from './stock.ts'
 import type { Transferencia } from './stock.ts'
 import type { DocumentoVenta, PanelResumen, ComprobanteFiscal } from './ventas.ts'
+import type { OrdenCompra, PagoProveedor, Recepcion, FacturaCompra } from './compras.ts'
+import type { Cheque, CuentaTesoreria, MovimientoTesoreria } from './tesoreria.ts'
+import type { Asiento, Periodo } from './contabilidad.ts'
+import type { Alicuota, DeterminacionIva, Retencion } from './fiscal.ts'
 import type { Miembro } from './gobierno.ts'
 import type { AuditoriaEvento } from './gobierno.ts'
 import type { Tarea } from './gobierno.ts'
@@ -651,4 +655,380 @@ export const tareas: Tarea[] = [
     titulo: 'Cargar catálogo Q4',
     estado: 'completada',
   },
+]
+
+// ---------------------------------------------------------------------------
+// Finanzas (F6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Períodos contables, con los tres casos que la ventana necesita mostrar:
+ * uno **cerrado** (Julio), uno **reabierto** (Agosto, con su motivo y su autor —el
+ * rastro que el motor exige) y los abiertos donde todavía se imputa.
+ *
+ * Los campos respetan los CHECK del motor: `closed` y `cerradoEn` van siempre
+ * juntos, y una reapertura tiene motivo y autor. `periodos.test.ts` lo verifica.
+ */
+export const periodos: Periodo[] = [
+  {
+    id: 'per_2026_07',
+    numero: 7,
+    nombre: 'Julio 2026',
+    ejercicio: 2026,
+    desde: '2026-07-01',
+    hasta: '2026-07-31',
+    estado: 'closed',
+    cerradoEn: '2026-08-04T12:00:00.000Z',
+    cerradoPor: 'Ana Dueña',
+    reabiertoEn: null,
+    reabiertoPor: null,
+    motivoReapertura: null,
+    asientosPendientes: 0,
+  },
+  {
+    id: 'per_2026_08',
+    numero: 8,
+    nombre: 'Agosto 2026',
+    ejercicio: 2026,
+    desde: '2026-08-01',
+    hasta: '2026-08-31',
+    estado: 'open',
+    cerradoEn: null,
+    cerradoPor: null,
+    reabiertoEn: '2026-09-08T09:30:00.000Z',
+    reabiertoPor: 'Ana Dueña',
+    motivoReapertura: 'Faltó imputar la factura de flete del 28/08',
+    asientosPendientes: 0,
+  },
+  {
+    id: 'per_2026_09',
+    numero: 9,
+    nombre: 'Septiembre 2026',
+    ejercicio: 2026,
+    desde: '2026-09-01',
+    hasta: '2026-09-30',
+    estado: 'open',
+    cerradoEn: null,
+    cerradoPor: null,
+    reabiertoEn: null,
+    reabiertoPor: null,
+    motivoReapertura: null,
+    asientosPendientes: 2,
+  },
+  {
+    id: 'per_2026_10',
+    numero: 10,
+    nombre: 'Octubre 2026',
+    ejercicio: 2026,
+    desde: '2026-10-01',
+    hasta: '2026-10-31',
+    estado: 'open',
+    cerradoEn: null,
+    cerradoPor: null,
+    reabiertoEn: null,
+    reabiertoPor: null,
+    motivoReapertura: null,
+    asientosPendientes: 0,
+  },
+]
+
+export const asientos: Asiento[] = [
+  {
+    id: 'as_001',
+    numero: 'AS-1041',
+    fecha: '2026-09-30',
+    descripcion: 'Venta FAC-A-00131',
+    origen: 'invoice',
+    debito: 124500000,
+    credito: 124500000,
+    periodoId: 'per_2026_09',
+    periodoNombre: 'Septiembre 2026',
+  },
+  {
+    id: 'as_002',
+    numero: 'AS-1042',
+    fecha: '2026-09-30',
+    descripcion: 'Costo de la mercadería vendida',
+    origen: 'stock_movement',
+    debito: 62000000,
+    credito: 62000000,
+    periodoId: 'per_2026_09',
+    periodoNombre: 'Septiembre 2026',
+  },
+  {
+    id: 'as_003',
+    numero: 'AS-1043',
+    fecha: '2026-09-28',
+    descripcion: 'Pago a proveedor OP-3310',
+    origen: 'supplier_payment',
+    debito: 48000000,
+    credito: 48000000,
+    periodoId: 'per_2026_09',
+    periodoNombre: 'Septiembre 2026',
+  },
+  {
+    id: 'as_004',
+    numero: 'AS-1038',
+    fecha: '2026-08-31',
+    descripcion: 'Ajuste de cierre de agosto',
+    origen: 'closing',
+    debito: 4500000,
+    credito: 4500000,
+    periodoId: 'per_2026_08',
+    periodoNombre: 'Agosto 2026',
+  },
+  {
+    id: 'as_005',
+    numero: 'AS-1046',
+    fecha: '2026-10-02',
+    descripcion: 'Compra de insumos de limpieza',
+    origen: 'purchase',
+    debito: 18000000,
+    credito: 18000000,
+    periodoId: 'per_2026_10',
+    periodoNombre: 'Octubre 2026',
+  },
+]
+
+/**
+ * Órdenes de compra, cubriendo los seis estados del CHECK del motor.
+ *
+ * `aprobadaEn` respeta `po_approval_recorded`: una orden en `approved`,
+ * `partially_received` o `received` **siempre** registra quién y cuándo aprobó. Sin
+ * eso, «aprobada» sería un estado que cualquiera escribe sin haber aprobado nada.
+ */
+export const ordenesCompra: OrdenCompra[] = [
+  {
+    id: 'oc_001',
+    numero: 'OC-2043',
+    proveedorId: 'prov_andes',
+    proveedor: 'Distribuidora Andes',
+    estado: 'received',
+    total: 48000000,
+    moneda: 'ARS',
+    fecha: '2026-09-10T10:00:00.000Z',
+    aprobadaEn: '2026-09-10T11:00:00.000Z',
+    recibidoCompleto: true,
+  },
+  {
+    id: 'oc_002',
+    numero: 'OC-2044',
+    proveedorId: 'prov_sur',
+    proveedor: 'Bebidas del Sur',
+    estado: 'partially_received',
+    total: 18500000,
+    moneda: 'ARS',
+    fecha: '2026-09-16T09:00:00.000Z',
+    aprobadaEn: '2026-09-16T10:00:00.000Z',
+    recibidoCompleto: false,
+  },
+  {
+    id: 'oc_003',
+    numero: 'OC-2045',
+    proveedorId: 'prov_norte',
+    proveedor: 'Insumos Norte',
+    estado: 'approved',
+    total: 7200000,
+    moneda: 'ARS',
+    fecha: '2026-09-19T14:00:00.000Z',
+    aprobadaEn: '2026-09-19T15:00:00.000Z',
+    recibidoCompleto: false,
+  },
+  {
+    id: 'oc_004',
+    numero: 'OC-2046',
+    proveedorId: 'prov_andes',
+    proveedor: 'Distribuidora Andes',
+    estado: 'pending_approval',
+    total: 3300000,
+    moneda: 'ARS',
+    fecha: '2026-09-20T08:00:00.000Z',
+    aprobadaEn: null,
+    recibidoCompleto: false,
+  },
+  {
+    id: 'oc_005',
+    numero: 'OC-2047',
+    proveedorId: 'prov_sur',
+    proveedor: 'Bebidas del Sur',
+    estado: 'draft',
+    total: 1450000,
+    moneda: 'ARS',
+    fecha: '2026-09-20T09:30:00.000Z',
+    aprobadaEn: null,
+    recibidoCompleto: false,
+  },
+]
+
+export const recepciones: Recepcion[] = [
+  {
+    id: 'rc_001',
+    numero: 'REC-0001',
+    ordenNumero: 'OC-2043',
+    proveedor: 'Distribuidora Andes',
+    documentoProveedor: 'R-88123',
+    unidades: 240,
+    fecha: '2026-09-12T09:00:00.000Z',
+  },
+  {
+    id: 'rc_002',
+    numero: 'REC-0002',
+    ordenNumero: 'OC-2044',
+    proveedor: 'Bebidas del Sur',
+    documentoProveedor: 'R-91004',
+    unidades: 96,
+    fecha: '2026-09-18T11:00:00.000Z',
+  },
+]
+
+export const facturasCompra: FacturaCompra[] = [
+  {
+    id: 'fc_001',
+    numero: 'FC-A-2201',
+    proveedor: 'Distribuidora Andes',
+    total: 48000000,
+    pagado: 48000000,
+    moneda: 'ARS',
+    venceEn: '2026-10-10',
+    estado: 'paid',
+    fecha: '2026-09-11T10:00:00.000Z',
+  },
+  {
+    id: 'fc_002',
+    numero: 'FC-A-2202',
+    proveedor: 'Bebidas del Sur',
+    total: 18500000,
+    pagado: 6000000,
+    moneda: 'ARS',
+    venceEn: '2026-10-16',
+    estado: 'partial',
+    fecha: '2026-09-17T10:00:00.000Z',
+  },
+  {
+    id: 'fc_003',
+    numero: 'FC-A-2203',
+    proveedor: 'Insumos Norte',
+    total: 7200000,
+    pagado: 0,
+    moneda: 'ARS',
+    venceEn: '2026-09-25',
+    estado: 'pending',
+    fecha: '2026-09-19T16:00:00.000Z',
+  },
+]
+
+export const pagosProveedor: PagoProveedor[] = [
+  {
+    id: 'pp_001',
+    numero: 'OP-3310',
+    proveedor: 'Distribuidora Andes',
+    monto: 48000000,
+    medio: 'transfer',
+    referencia: 'TRF-99231',
+    moneda: 'ARS',
+    fecha: '2026-09-20T10:00:00.000Z',
+  },
+  {
+    id: 'pp_002',
+    numero: 'OP-3311',
+    proveedor: 'Bebidas del Sur',
+    monto: 6000000,
+    medio: 'cheque',
+    referencia: 'CH-000412',
+    moneda: 'ARS',
+    fecha: '2026-09-22T10:00:00.000Z',
+  },
+]
+
+export const cuentasTesoreria: CuentaTesoreria[] = [
+  { id: 'ct_001', nombre: 'Caja central', tipo: 'cash', moneda: 'ARS', saldo: 485000, activa: true },
+  { id: 'ct_002', nombre: 'Banco Río · Cuenta corriente', tipo: 'bank', moneda: 'ARS', saldo: 18450000, activa: true },
+  { id: 'ct_003', nombre: 'Banco Pampa · Caja de ahorro USD', tipo: 'bank', moneda: 'USD', saldo: 320000, activa: false },
+]
+
+export const movimientosTesoreria: MovimientoTesoreria[] = [
+  {
+    id: 'mt_001',
+    fecha: '2026-09-20T10:00:00.000Z',
+    cuentaId: 'ct_002',
+    cuentaNombre: 'Banco Río · Cuenta corriente',
+    tipo: 'supplier_payment',
+    direccion: 'debit',
+    monto: 48000000,
+    descripcion: 'Pago FC-A-2201 a Distribuidora Andes',
+    conciliado: true,
+  },
+  {
+    id: 'mt_002',
+    fecha: '2026-09-18T12:00:00.000Z',
+    cuentaId: 'ct_002',
+    cuentaNombre: 'Banco Río · Cuenta corriente',
+    tipo: 'customer_payment',
+    direccion: 'credit',
+    monto: 35800000,
+    descripcion: 'Cobro FAC-A-00131 de Distribuidora Sur',
+    conciliado: false,
+  },
+  {
+    id: 'mt_003',
+    fecha: '2026-09-16T09:00:00.000Z',
+    cuentaId: 'ct_001',
+    cuentaNombre: 'Caja central',
+    tipo: 'customer_payment',
+    direccion: 'credit',
+    monto: 890000,
+    descripcion: 'Cobro de mostrador',
+    conciliado: true,
+  },
+  {
+    id: 'mt_004',
+    fecha: '2026-09-22T10:00:00.000Z',
+    cuentaId: 'ct_002',
+    cuentaNombre: 'Banco Río · Cuenta corriente',
+    tipo: 'check_rejected',
+    direccion: 'debit',
+    monto: 6000000,
+    descripcion: 'Cheque CH-000412 rechazado',
+    conciliado: false,
+  },
+  {
+    id: 'mt_005',
+    fecha: '2026-09-15T09:00:00.000Z',
+    cuentaId: 'ct_002',
+    cuentaNombre: 'Banco Río · Cuenta corriente',
+    tipo: 'bank_fee',
+    direccion: 'debit',
+    monto: 45000,
+    descripcion: 'Comisión de mantenimiento',
+    conciliado: true,
+  },
+]
+
+export const cheques: Cheque[] = [
+  { id: 'ch_001', numero: 'CH-000412', estado: 'endorsed', librador: 'Bebidas del Sur', monto: 6000000, moneda: 'ARS', venceEn: '2026-10-05', propio: false },
+  { id: 'ch_002', numero: 'CH-000413', estado: 'in_portfolio', librador: 'Distribuidora Andes', monto: 1250000, moneda: 'ARS', venceEn: '2026-10-12', propio: false },
+  { id: 'ch_003', numero: 'CH-000900', estado: 'deposited', librador: 'Control SA', monto: 2400000, moneda: 'ARS', venceEn: '2026-09-28', propio: true },
+  { id: 'ch_004', numero: 'CH-000901', estado: 'rejected', librador: 'Control SA', monto: 980000, moneda: 'ARS', venceEn: '2026-09-20', propio: true },
+]
+
+export const determinacionIva: DeterminacionIva = {
+  periodo: '2026-09',
+  ventasNetas: 41200000,
+  ivaDebito: 8652000,
+  comprasNetas: 22800000,
+  ivaCredito: 4788000,
+  saldoTecnico: 3864000,
+  estado: 'a_pagar',
+  calculadaEn: '2026-10-02T06:00:00.000Z',
+}
+
+export const alicuotas: Alicuota[] = [
+  { id: 'al_001', impuesto: 'IVA', codigo: '21', porcentaje: 21, desde: '2026-01-01', hasta: null },
+  { id: 'al_002', impuesto: 'IVA', codigo: '10.5', porcentaje: 10.5, desde: '2026-01-01', hasta: null },
+  { id: 'al_003', impuesto: 'Ingresos brutos', codigo: '3', porcentaje: 3, desde: '2026-01-01', hasta: null },
+]
+
+export const retenciones: Retencion[] = [
+  { id: 'rt_001', regimen: 'IVA', sujeto: 'Distribuidora Andes', base: 48000000, alicuota: 0.5, monto: 240000, fecha: '2026-09-20' },
+  { id: 'rt_002', regimen: 'Ingresos brutos', sujeto: 'Bebidas del Sur', base: 18500000, alicuota: 3, monto: 555000, fecha: '2026-09-17' },
 ]

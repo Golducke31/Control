@@ -33,11 +33,17 @@ export type Grupo = keyof typeof GRUPOS
 /**
  * Los permisos que la base ya tiene.
  *
- * Es el espejo de `app.permissions`: 33 permisos en 13 recursos. La suite de rutas
- * comprueba que ninguna ventana use un permiso que no esté acá ni en la lista de
- * pendientes, para que una ruta no quede sin guard por un nombre mal escrito.
+ * Es el espejo de `app.permissions`: **51 permisos en 16 recursos**. Los 33
+ * originales más los 18 que sembró la fase F6 (compras, tesorería, contabilidad,
+ * fiscal y tareas programadas). La suite de rutas comprueba que ninguna ventana use
+ * un permiso que no esté acá, y `tools/check-permissions.mjs` cruza esta lista
+ * contra el catálogo SQL en los dos sentidos — si divergen, `npm run verify` falla.
  */
 export const PERMISOS_SEMBRADOS = [
+  'accounting.close',
+  'accounting.manage_accounts',
+  'accounting.post',
+  'accounting.read',
   'audit.read',
   'billing.afip_credentials',
   'billing.credit_note',
@@ -50,6 +56,10 @@ export const PERMISOS_SEMBRADOS = [
   'catalog.write',
   'customers.read',
   'customers.write',
+  'fiscal.determine',
+  'fiscal.manage_rates',
+  'fiscal.read',
+  'fiscal.withholdings',
   'inventory.adjust',
   'inventory.read',
   'inventory.transfer',
@@ -59,7 +69,13 @@ export const PERMISOS_SEMBRADOS = [
   'logistics.dispatch',
   'logistics.read',
   'logistics.write',
+  'ops.read',
+  'ops.run',
   'payments.manage',
+  'purchasing.pay',
+  'purchasing.read',
+  'purchasing.receive',
+  'purchasing.write',
   'reports.export',
   'reports.financial',
   'sales.cancel',
@@ -71,40 +87,26 @@ export const PERMISOS_SEMBRADOS = [
   'tenant.branding',
   'tenant.features',
   'tenant.settings',
-] as const
-
-/**
- * Los permisos que el mapa necesita y la base todavía no tiene.
- *
- * El RBAC cubre 5 de los 11 módulos: no existe permiso para compras, tesorería,
- * contabilidad, fiscal ni tareas. Sin ellos, cuatro ventanas de la fase F6 quedarían
- * sin guard —visibles en el menú para cualquiera y accesibles por URL—. La migración
- * de datos `0026` los siembra y los asigna a los roles de sistema.
- *
- * Están declarados acá y no inventados en el componente por una razón: así la suite
- * sabe cuáles faltan y el día que se siembren, se mueven de esta lista a la anterior
- * y nada más cambia.
- */
-export const PERMISOS_PENDIENTES = [
-  'accounting.close',
-  'accounting.manage_accounts',
-  'accounting.post',
-  'accounting.read',
-  'fiscal.determine',
-  'fiscal.manage_rates',
-  'fiscal.read',
-  'fiscal.withholdings',
-  'ops.read',
-  'ops.run',
-  'purchasing.pay',
-  'purchasing.read',
-  'purchasing.receive',
-  'purchasing.write',
   'treasury.checks',
   'treasury.read',
   'treasury.reconcile',
   'treasury.write',
 ] as const
+
+/**
+ * Los permisos que el mapa necesita y la base todavía no tiene.
+ *
+ * **Está vacía desde F6.** Los 18 permisos que faltaban —compras, tesorería,
+ * contabilidad, fiscal y tareas programadas— se sembraron en
+ * `db/seed/0001_system_catalog.sql` y se asignaron a los roles de sistema, así que
+ * las catorce ventanas tienen guard.
+ *
+ * La lista se conserva vacía en vez de eliminarse porque es el mecanismo con el que
+ * una fase futura declara un permiso antes de sembrarlo: mientras tenga entradas,
+ * `rutas.test.ts` lo reporta, y `tools/check-permissions.mjs` cruza las dos listas
+ * contra el catálogo SQL. Un arreglo no vacío significa «falta sembrar», no «error».
+ */
+export const PERMISOS_PENDIENTES = [] as const
 
 export type Permiso = (typeof PERMISOS_SEMBRADOS)[number] | (typeof PERMISOS_PENDIENTES)[number]
 
