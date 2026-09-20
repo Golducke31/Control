@@ -17,6 +17,14 @@ import {
 import { ChequeSchema, CuentaTesoreriaSchema, MovimientoTesoreriaSchema } from './tesoreria.ts'
 import { AsientoSchema, PeriodoSchema } from './contabilidad.ts'
 import { AlicuotaSchema, DeterminacionIvaSchema, RetencionSchema } from './fiscal.ts'
+import {
+  ConfirmacionEntregaSchema,
+  EnvioSchema,
+  EventoTrackingSchema,
+  IncidenciaSchema,
+  ParadaSchema,
+  VehiculoSchema,
+} from './logistica.ts'
 import { MiembroSchema } from './gobierno.ts'
 import {
   productos,
@@ -38,6 +46,12 @@ import {
   alicuotas,
   determinacionIva,
   retenciones,
+  envios,
+  paradas,
+  vehiculos,
+  incidencias,
+  eventosTracking,
+  confirmacionesEntrega,
   miembros,
   auditoria,
   tareas,
@@ -196,4 +210,50 @@ test('una factura de compra no puede tener pagado más que su total', () => {
     assert.ok(f.pagado <= f.total, `${f.numero}: pagado ${f.pagado} > total ${f.total}`)
     if (f.estado === 'paid') assert.equal(f.pagado, f.total, `${f.numero} dice pagada sin estarlo`)
   }
+})
+
+test('los fixtures de logística validan contra sus esquemas', () => {
+  for (const e of envios) EnvioSchema.parse(e)
+  for (const p of paradas) ParadaSchema.parse(p)
+  for (const v of vehiculos) VehiculoSchema.parse(v)
+  for (const i of incidencias) IncidenciaSchema.parse(i)
+  for (const ev of eventosTracking) EventoTrackingSchema.parse(ev)
+  for (const c of confirmacionesEntrega) ConfirmacionEntregaSchema.parse(c)
+})
+
+test('cada parada pertenece a un envío que existe y su orden no se repite dentro del envío', () => {
+  const ids = new Set(envios.map((e) => e.id))
+  for (const p of paradas) {
+    assert.ok(ids.has(p.envioId), `la parada ${p.id} apunta a un envío inexistente`)
+  }
+  for (const e of envios) {
+    const ordenes = paradas.filter((p) => p.envioId === e.id).map((p) => p.orden)
+    assert.equal(new Set(ordenes).size, ordenes.length, `${e.numero} tiene dos paradas con el mismo orden`)
+  }
+})
+
+test('una parada completada siempre tiene su fecha de finalización', () => {
+  for (const p of paradas) {
+    assert.equal(
+      p.estado === 'completed',
+      p.completadaEn !== null,
+      `${p.id}: completada y completadaEn tienen que ir juntos`,
+    )
+  }
+})
+
+test('una confirmación firmada tiene receptor y conformidad; una pendiente no', () => {
+  for (const c of confirmacionesEntrega) {
+    if (c.confirmadaEn !== null) {
+      assert.notEqual(c.receptor, null, `${c.id}: firmada sin receptor`)
+      assert.notEqual(c.conforme, null, `${c.id}: firmada sin decir si fue conforme`)
+    } else {
+      assert.equal(c.conforme, null, `${c.id}: sin firmar no puede declarar conformidad`)
+    }
+  }
+})
+
+test('los códigos de tracking son únicos (espeja sh_tracking_unique)', () => {
+  const codigos = envios.map((e) => e.trackingCode)
+  assert.equal(new Set(codigos).size, codigos.length)
 })

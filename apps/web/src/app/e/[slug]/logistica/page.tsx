@@ -1,17 +1,24 @@
+import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { getCliente } from '@/datos/cliente'
+import { LogisticaCliente } from './LogisticaCliente'
 
-import { VentanaPendiente } from '@/componentes/VentanaPendiente'
-import { ventanaPorId } from '@/rutas'
+export const metadata: Metadata = { title: 'Logística' }
 
 /**
- * La ventana se declara en el mapa de rutas, con su permiso, su grupo y sus subrutas.
- * El contenido llega en la fase que el mapa indica; hasta entonces esta página muestra
- * lo que el mapa dice de ella, para que la arquitectura sea verificable a simple vista.
+ * Logística (F7).
+ *
+ * Server Component: resuelve la primera página de envíos y la pasa como `initialData`.
+ * La ventana está detrás de la bandera `logistics.enabled` de la empresa, así que una
+ * empresa sin transporte no la ve en el menú ni la alcanza por URL.
  */
-const ventana = ventanaPorId('logistica')
+export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const inicial = await getCliente().listarEnvios({ empresaSlug: slug, pagina: 1, porPagina: 10 })
 
-export const metadata: Metadata = { title: ventana.titulo }
-
-export default function Pagina() {
-  return <VentanaPendiente ventana={ventana} />
+  return (
+    <Suspense>
+      <LogisticaCliente slug={slug} initialData={inicial} />
+    </Suspense>
+  )
 }

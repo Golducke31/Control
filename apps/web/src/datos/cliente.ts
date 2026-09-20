@@ -6,6 +6,8 @@ import type {
   DepositoListado,
   DeterminacionIva,
   DocumentoVentaListado,
+  EnvioListado,
+  EventoTrackingListado,
   FacturacionListado,
   MovimientoStock,
   MovimientoStockListado,
@@ -15,6 +17,7 @@ import type {
   Orden,
   OrdenCompraListado,
   PanelResumen,
+  ParadaListado,
   Periodo,
   PeriodoListado,
   ProductoListado,
@@ -23,6 +26,7 @@ import type {
   ResultadoRecuento,
   ResultadoReapertura,
   ResultadoTransferencia,
+  TrackingPublico,
   TransferenciaListado,
 } from '@control/contracts'
 import {
@@ -32,21 +36,27 @@ import {
   DepositoListadoSchema,
   DeterminacionIvaSchema,
   DocumentoVentaListadoSchema,
+  EnvioListadoSchema,
+  EventoTrackingListadoSchema,
   FacturacionListadoSchema,
   MovimientoStockListadoSchema,
   MovimientoTesoreriaListadoSchema,
   NivelStockListadoSchema,
   OrdenCompraListadoSchema,
   PanelResumenSchema,
+  ParadaListadoSchema,
   PeriodoListadoSchema,
   ProductoListadoSchema,
   ReposicionListadoSchema,
+  TrackingPublicoSchema,
   TransferenciaListadoSchema,
   aplicarRecuento,
   aplicarTransferencia,
   cerrarPeriodo as cerrarPeriodoPuro,
   conciliar,
   deltaDeMovimiento,
+  envioPorTracking,
+  proyeccionPublica,
   reabrirPeriodo as reabrirPeriodoPuro,
 } from '@control/contracts'
 import {
@@ -66,6 +76,9 @@ import {
   asientos,
   periodos,
   determinacionIva,
+  envios,
+  paradas,
+  eventosTracking,
 } from '@control/contracts/fixtures'
 
 /** Parámetros comunes de una consulta de lista. */
@@ -134,6 +147,18 @@ export interface ApiClient {
     autor: string
     motivo: string
   }): Promise<ResultadoReapertura>
+
+  // --- Logística (F7) ---
+  listarEnvios(p: ParametrosLista): Promise<EnvioListado>
+  listarParadas(p: ParametrosLista & { envioId?: string }): Promise<ParadaListado>
+  listarEventos(p: ParametrosLista & { envioId?: string }): Promise<EventoTrackingListado>
+  /**
+   * La proyección pública de un envío, por su token.
+   *
+   * Devuelve `null` cuando el token no existe —no un envío vacío—: la página pública
+   * tiene que poder distinguir «no existe» de «existe sin eventos».
+   */
+  obtenerTrackingPublico(empresaSlug: string, token: string): Promise<TrackingPublico | null>
 }
 
 /** Pequeño motor de consulta en memoria sobre los fixtures. */
@@ -548,6 +573,74 @@ export class SimuladoCliente implements ApiClient {
     if (i !== -1) almacen.periodos[i] = resultado.periodo
     return resultado
   }
+
+  // --- Logística (F7) ---
+
+  async listarEnvios(p: ParametrosLista): Promise<EnvioListado> {
+    const r = consultar(
+      envios,
+      p,
+      (x) => `${x.numero} ${x.cliente} ${x.estado} ${x.localidadDestino} ${x.trackingCode}`,
+      (x, campo) => {
+        if (campo === 'numero' || campo === 'cliente' || campo === 'estado' || campo === 'prioridad') return x[campo]
+        if (campo === 'localidadDestino') return x.localidadDestino
+        return undefined
+      },
+    )
+    return EnvioListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarParadas(p: ParametrosLista & { envioId?: string }): Promise<ParadaListado> {
+    const base = p.envioId === undefined ? paradas : paradas.filter((x) => x.envioId === p.envioId)
+    const r = consultar(
+      base,
+      p,
+      (x) => `${x.direccion} ${x.localidad} ${x.tipo} ${x.estado}`,
+      (x, campo) => {
+        if (campo === 'orden') return x.orden
+        if (campo === 'localidad') return x.localidad
+        return undefined
+      },
+    )
+    return ParadaListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarEventos(p: ParametrosLista & { envioId?: string }): Promise<EventoTrackingListado> {
+    const base = p.envioId === undefined ? eventosTracking : eventosTracking.filter((x) => x.envioId === p.envioId)
+    const r = consultar(
+      base,
+      p,
+      (x) => `${x.codigo} ${x.descripcion} ${x.estado}`,
+      (x, campo) => {
+        if (campo === 'fecha') return x.fecha
+        if (campo === 'estado' || campo === 'codigo') return x[campo]
+        return undefined
+      },
+    )
+    return EventoTrackingListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async obtenerTrackingPublico(empresaSlug: string, token: string): Promise<TrackingPublico | null> {
+    const envio = envioPorTracking(envios, token)
+    if (envio === null) return null
+    // La proyección pública es una lista blanca: se construye acá, no en la página,
+    // para que ninguna pantalla pueda decidir por su cuenta qué se publica.
+    return TrackingPublicoSchema.parse(
+      proyeccionPublica(
+        envio,
+        eventosTracking.filter((e) => e.envioId === envio.id),
+      ),
+    )
+  }
 }
 
 /**
@@ -653,6 +746,38 @@ export class HttpCliente implements ApiClient {
   }
   async reabrirPeriodo(): Promise<ResultadoReapertura> {
     throw new Error('reabrirPeriodo sobre HTTP llega con el backend (F9); usá NEXT_PUBLIC_API_MODE=simulado')
+  }
+
+  listarEnvios(p: ParametrosLista): Promise<EnvioListado> {
+    return this.pedir('/logistica/envios', p, EnvioListadoSchema)
+  }
+  listarParadas(p: ParametrosLista & { envioId?: string }): Promise<ParadaListado> {
+    const ruta =
+      p.envioId === undefined
+        ? '/logistica/paradas'
+        : `/logistica/envios/${encodeURIComponent(p.envioId)}/paradas`
+    return this.pedir(ruta, p, ParadaListadoSchema)
+  }
+  listarEventos(p: ParametrosLista & { envioId?: string }): Promise<EventoTrackingListado> {
+    const ruta =
+      p.envioId === undefined
+        ? '/logistica/eventos'
+        : `/logistica/envios/${encodeURIComponent(p.envioId)}/eventos`
+    return this.pedir(ruta, p, EventoTrackingListadoSchema)
+  }
+
+  /**
+   * El tracking público no pasa por `pedir`: su 404 es un resultado esperado —el token
+   * no existe— y no una excepción. Convertirlo en `null` deja que la página pública
+   * muestre «no encontramos ese envío» en vez de un error de red.
+   */
+  async obtenerTrackingPublico(_empresaSlug: string, token: string): Promise<TrackingPublico | null> {
+    const res = await fetch(`${this.baseUrl}/publico/tracking/${encodeURIComponent(token)}`, {
+      headers: { accept: 'application/json' },
+    })
+    if (res.status === 404) return null
+    if (!res.ok) throw new Error(`Error ${res.status} al consultar el tracking público`)
+    return TrackingPublicoSchema.parse(await res.json())
   }
 }
 

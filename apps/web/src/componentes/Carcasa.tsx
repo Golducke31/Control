@@ -8,6 +8,7 @@ import { SelectorDeEmpresa } from './SelectorDeEmpresa'
 import type { BloqueDeMenu } from './tipos'
 import { menuPorGrupo, ventanasVisibles } from '@/rutas'
 import { ProveedorSesion, type ContextoEmpresa } from '@/sesion'
+import { IndicadorDeConexion, ProveedorEnVivo } from './ProveedorEnVivo'
 
 /**
  * La carcasa de la empresa.
@@ -32,6 +33,12 @@ export function Carcasa({ contexto, children }: { contexto: ContextoEmpresa; chi
 
   return (
     <ProveedorSesion contexto={contexto}>
+      {/*
+        El canal de tiempo real se monta acá y sólo acá: una conexión SSE por pestaña,
+        multiplexada por tópico (§5.6). Si lo montara cada ventana, la torre de control
+        con doscientos envíos abriría doscientas conexiones.
+      */}
+      <ProveedorEnVivo>
       <div className="flex min-h-screen flex-col">
         <header className="sticky top-0 z-30 flex h-[var(--control-alto-encabezado)] shrink-0 items-center gap-2 border-b border-borde-sutil bg-carcasa px-3 sm:px-4">
           <MenuMovil bloques={bloques} slug={empresa.slug} />
@@ -51,6 +58,12 @@ export function Carcasa({ contexto, children }: { contexto: ContextoEmpresa; chi
           <SelectorDeEmpresa empresas={contexto.empresas} actual={empresa} />
 
           <div className="ml-auto flex items-center gap-2">
+            {/*
+              El estado de la conexión en vivo, siempre visible (§5.6). No aparece sólo
+              cuando falla: una pantalla que parece actualizada y no lo está es peor que
+              una que avisa, porque el operador decide sobre datos que ya cambiaron.
+            */}
+            <IndicadorDeConexion />
             {/*
               La ventana de tareas programadas es la que avisa que algo dejó de correr.
               El contador es decorativo en F1: los datos llegan en F8.
@@ -98,6 +111,7 @@ export function Carcasa({ contexto, children }: { contexto: ContextoEmpresa; chi
           </main>
         </div>
       </div>
+      </ProveedorEnVivo>
     </ProveedorSesion>
   )
 }

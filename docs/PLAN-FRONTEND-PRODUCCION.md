@@ -9,7 +9,7 @@
 - [`PLAN-ERP-MULTIEMPRESA.md`](PLAN-ERP-MULTIEMPRESA.md) — brechas funcionales y fases E0–E9. **Este plan se ejecuta en paralelo a E7**, no lo reemplaza.
 - `prototype/index.html` — prototipo de diseño que este plan reemplaza.
 
-> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos**, **F4 · Operación diaria**, **F5 · Inventario** y **F6 · Finanzas** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel**, **Ventas** y **Facturación**, más la lógica pura de transiciones de la cadena de documentos. F5 entregó la ventana **Stock** completa, la lógica pura de inventario y el primer camino de escritura del frontend. F6 entregó las ventanas **Compras**, **Tesorería**, **Contabilidad** (con **Períodos**) y **Fiscal**, la lógica pura del cierre de período, y **cerró el hueco del RBAC**: los 18 permisos que faltaban están sembrados y asignados, con una aserción en la base y un gate mecánico en `npm run verify`. Lo que sigue es **F7 · Logística**.
+> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos**, **F4 · Operación diaria**, **F5 · Inventario**, **F6 · Finanzas** y **F7 · Logística** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel**, **Ventas** y **Facturación**, más la lógica pura de transiciones de la cadena de documentos. F5 entregó la ventana **Stock** completa, la lógica pura de inventario y el primer camino de escritura del frontend. F6 entregó las ventanas **Compras**, **Tesorería**, **Contabilidad** (con **Períodos**) y **Fiscal**, la lógica pura del cierre de período, y cerró el hueco del RBAC (51 permisos en 16 recursos). F7 entregó la ventana **Logística** con su torre de control, el **tracking público** y la **PWA del conductor**, más el canal de tiempo real: **una sola conexión SSE por pestaña, multiplexada por tópico**, con el estado de la conexión a la vista. Lo que sigue es **F8 · Gobierno, marca y plataforma**.
 >
 > Tres ajustes respecto de lo planeado, decididos al implementar y documentados donde corresponden:
 > 1. `packages/contracts` y `packages/graficos` se crean en **F3** y **F4**, con su primer consumidor real, no en F1: un paquete sin consumidor es un lastre que nadie mantiene.
@@ -990,7 +990,43 @@ Compras (11), Tesorería (8), Contabilidad (7) y Fiscal (7). **Requiere la migra
 ### F7 · Logística
 Torre de control con mapa en vivo por SSE, Envíos, Flota, Incidencias, POD, tracking público y la PWA de conductor.
 
+**Alcance entregado en esta pasada.** La ventana **Logística** (tablero de envíos con las transiciones que su estado habilita), la **Torre de control** (el tablero activo suscrito al canal en vivo), el **tracking público** `/t/[token]` fuera de la carcasa, y el **panel del conductor** `/chofer` con la cola offline. Más el **canal de tiempo real** completo: el multiplexor, el route handler que emite SSE, el proveedor montado una sola vez en la carcasa, y el indicador de conexión en el encabezado.
+
+**La lógica pura** vive en cuatro módulos de `packages/contracts` con sus suites:
+
+| Módulo | Qué resuelve | La cláusula de la puerta que cubre |
+| --- | --- | --- |
+| `canal.ts` | El multiplexor: cuándo tiene que haber conexión y quién escucha qué | 200 envíos, **una sola** conexión |
+| `colaOffline.ts` | La cola de la PWA: orden, deduplicación por id de operación, reintento | La PWA funciona sin red y sincroniza al volver |
+| `tracking.ts` | `proyeccionPublica`, lista blanca de siete campos | El tracking público no expone datos de otros envíos |
+| `envios.ts` | La máquina de estados del envío y sus coherencias | (sostiene la ventana) |
+
+**Por qué la puerta se puede verificar sin navegador.** Los tres requisitos parecían pedir un navegador, y ninguno lo necesita si la regla se modela como lógica pura: «una sola conexión» es una propiedad del multiplexor, no del transporte; «sincroniza al volver» es una propiedad de la cola; «no expone datos de otros envíos» es una propiedad de la proyección. Lo que **sí** queda pendiente de navegador está listado abajo, y es menos de lo que parece.
+
 **Puerta:** 200 envíos con **una sola** conexión SSE; la PWA funciona sin red y sincroniza al volver; el tracking público no expone datos de otros envíos.
+
+| Criterio de la puerta | Evidencia | Resultado |
+| --- | --- | --- |
+| 200 envíos, una sola conexión | `canal.test.ts` suscribe 200 tópicos y afirma `conexiones === 1` (PUERTA F7·1) | ✅ |
+| La conexión sigue a los suscriptores y a la pestaña | Se abre con el primero, se cierra con el último; oculta la pestaña se cierra y al volver se reanuda | ✅ |
+| La reconexión no sincroniza las pestañas | Retroceso exponencial con **jitter completo**, con el azar inyectado para que sea determinista | ✅ |
+| La PWA funciona sin red | `colaOffline.test.ts`: encolar, orden, deduplicación, reintento | ✅ |
+| …y sincroniza al volver | `sincronizar` vacía la cola en orden; una falla la detiene **sin reordenar** | ✅ |
+| Un reenvío no aplica dos veces | El id de operación es el `clientEventId` del motor (`te_client_dedup`); una operación ya aplicada no se reencola | ✅ |
+| El tracking público no expone datos de otros envíos | La proyección filtra por `envioId` y `TrackingPublicoSchema` es una lista blanca (PUERTA F7·3) | ✅ |
+| …ni datos de más del propio envío | `tracking.test.ts` compara las claves exactas contra `CLAVES_PUBLICAS` y busca el cliente, el transportista, la patente y el token en el JSON serializado | ✅ |
+| El usuario sabe si lo que ve es actual | Indicador en el encabezado: en vivo · reconectando · sin conexión (§5.6) | ✅ |
+
+**Verificación mecánica.** `npm run verify` en verde (8 validadores); typecheck de 5 workspaces; `node --test` en `packages/contracts` (**116**) y `apps/web` (**73**) en verde; `next build` de `@control/web` exitoso.
+
+**Lo que queda pendiente de navegador** — y conviene decirlo con precisión, porque es la primera fase donde aparece:
+
+1. **El registro del service worker y el caché offline real.** La cola offline es lógica pura y está probada, pero que la app *cargue* sin red depende de un service worker, y su registro necesita un navegador.
+2. **El transporte SSE contra el servidor.** El codificador tiene su prueba —incluida la trampa del salto de línea que parte el marco— y el route handler es real, pero que los eventos lleguen y la reconexión se comporte en vivo no se puede automatizar acá: `agent-browser` no corre en Windows.
+3. **El render del mapa.** La torre muestra el tablero en vivo; el mapa con posiciones sobre el terreno necesita `packages/graficos`, que se crea con su primer consumidor real y todavía no lo tiene.
+4. **El stream emite datos simulados.** No hay backend de eventos (llega en F9): el formato, el enrutamiento por tópico y el ciclo de vida de la conexión son reales; el origen de los datos no.
+
+**Alcance movido.** Las sub-rutas `logistica/envios`, `envios/nuevo`, `envios/[id]`, `flota`, `transportistas`, `incidencias`, `pod` y `chofer/entrega/[id]` quedan como seguimiento: son listados y formularios. `torre` sí entró porque es donde vive el canal, y el tracking público y el panel del conductor porque cada uno es una cláusula de la puerta.
 
 ### F8 · Gobierno, marca y plataforma
 Equipo, Configuración, Auditoría, Tareas, consola de plataforma, y las 5 plantillas de `app.ui_templates` aplicables en vivo. Incluye el **lint de textos**: con `next-intl` y los archivos de mensajes en su lugar, ninguna cadena de interfaz puede quedar escrita en un componente.

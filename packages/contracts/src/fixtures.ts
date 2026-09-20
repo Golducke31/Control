@@ -11,6 +11,14 @@ import type { OrdenCompra, PagoProveedor, Recepcion, FacturaCompra } from './com
 import type { Cheque, CuentaTesoreria, MovimientoTesoreria } from './tesoreria.ts'
 import type { Asiento, Periodo } from './contabilidad.ts'
 import type { Alicuota, DeterminacionIva, Retencion } from './fiscal.ts'
+import type {
+  ConfirmacionEntrega,
+  Envio,
+  EventoTracking,
+  Incidencia,
+  Parada,
+  Vehiculo,
+} from './logistica.ts'
 import type { Miembro } from './gobierno.ts'
 import type { AuditoriaEvento } from './gobierno.ts'
 import type { Tarea } from './gobierno.ts'
@@ -1031,4 +1039,269 @@ export const alicuotas: Alicuota[] = [
 export const retenciones: Retencion[] = [
   { id: 'rt_001', regimen: 'IVA', sujeto: 'Distribuidora Andes', base: 48000000, alicuota: 0.5, monto: 240000, fecha: '2026-09-20' },
   { id: 'rt_002', regimen: 'Ingresos brutos', sujeto: 'Bebidas del Sur', base: 18500000, alicuota: 3, monto: 555000, fecha: '2026-09-17' },
+]
+
+// ---------------------------------------------------------------------------
+// Logística (F7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Envíos, cubriendo los ocho estados de `logistics.shipment_status`.
+ *
+ * Todos respetan las dos coherencias del motor: `sh_delivered_ts` (sólo el entregado
+ * tiene fecha de entrega) y `sh_window_valid` (la ventana no termina antes de
+ * empezar). `envios.test.ts` lo verifica.
+ *
+ * El `trackingCode` es único por empresa (`sh_tracking_unique`) y es lo que resuelve
+ * la página pública: por eso ninguno se repite.
+ */
+export const envios: Envio[] = [
+  {
+    id: 'env_001',
+    numero: 'ENV-0001',
+    trackingCode: 'TRK-9F2K7A01',
+    cliente: 'Distribuidora Sur',
+    estado: 'delivered',
+    prioridad: 2,
+    desde: 'Depósito central, Av. Rivadavia 4200',
+    hasta: 'Av. Siempre Viva 742',
+    localidadDestino: 'Lanús',
+    ventanaDesde: '2026-09-20T13:00:00.000Z',
+    ventanaHasta: '2026-09-20T18:00:00.000Z',
+    despachadoEn: '2026-09-20T10:00:00.000Z',
+    entregadoEn: '2026-09-20T15:30:00.000Z',
+    distanciaMetros: 18400,
+    transportista: 'Transportes Ríos',
+    patente: 'AB 123 CD',
+    paradas: 2,
+    paradasCompletadas: 2,
+  },
+  {
+    id: 'env_002',
+    numero: 'ENV-0002',
+    trackingCode: 'TRK-9F2K7A02',
+    cliente: 'Mayorista Norte',
+    estado: 'out_for_delivery',
+    prioridad: 1,
+    desde: 'Depósito central, Av. Rivadavia 4200',
+    hasta: 'Ruta 9 km 42, Escobar',
+    localidadDestino: 'Escobar',
+    ventanaDesde: '2026-09-20T14:00:00.000Z',
+    ventanaHasta: '2026-09-20T19:00:00.000Z',
+    despachadoEn: '2026-09-20T11:00:00.000Z',
+    entregadoEn: null,
+    distanciaMetros: 52100,
+    transportista: 'Transportes Ríos',
+    patente: 'EF 456 GH',
+    paradas: 2,
+    paradasCompletadas: 1,
+  },
+  {
+    id: 'env_003',
+    numero: 'ENV-0003',
+    trackingCode: 'TRK-9F2K7A03',
+    cliente: 'Kiosco Centro',
+    estado: 'in_transit',
+    prioridad: 2,
+    desde: 'Depósito sur, Camino de Cintura 1500',
+    hasta: 'Belgrano 1220',
+    localidadDestino: 'Lanús',
+    ventanaDesde: '2026-09-20T15:00:00.000Z',
+    ventanaHasta: '2026-09-20T20:00:00.000Z',
+    despachadoEn: '2026-09-20T12:00:00.000Z',
+    entregadoEn: null,
+    distanciaMetros: 6100,
+    transportista: 'Flota propia',
+    patente: 'IJ 789 KL',
+    paradas: 2,
+    paradasCompletadas: 1,
+  },
+  {
+    id: 'env_004',
+    numero: 'ENV-0004',
+    trackingCode: 'TRK-9F2K7A04',
+    cliente: 'Bar Norte',
+    estado: 'incident',
+    prioridad: 3,
+    desde: 'Depósito central, Av. Rivadavia 4200',
+    hasta: 'San Martín 850',
+    localidadDestino: 'San Isidro',
+    ventanaDesde: '2026-09-20T14:00:00.000Z',
+    ventanaHasta: '2026-09-20T17:00:00.000Z',
+    despachadoEn: '2026-09-20T09:30:00.000Z',
+    entregadoEn: null,
+    distanciaMetros: 27300,
+    transportista: 'Transportes Ríos',
+    patente: 'AB 123 CD',
+    paradas: 2,
+    paradasCompletadas: 1,
+  },
+  {
+    id: 'env_005',
+    numero: 'ENV-0005',
+    trackingCode: 'TRK-9F2K7A05',
+    cliente: 'Almacén Sur',
+    estado: 'ready',
+    prioridad: 2,
+    desde: 'Depósito sur, Camino de Cintura 1500',
+    hasta: 'Mitre 455',
+    localidadDestino: 'Avellaneda',
+    ventanaDesde: '2026-09-21T09:00:00.000Z',
+    ventanaHasta: '2026-09-21T13:00:00.000Z',
+    despachadoEn: null,
+    entregadoEn: null,
+    distanciaMetros: 9200,
+    transportista: 'Transportes Ríos',
+    patente: null,
+    paradas: 1,
+    paradasCompletadas: 0,
+  },
+  {
+    id: 'env_006',
+    numero: 'ENV-0006',
+    trackingCode: 'TRK-9F2K7A06',
+    cliente: 'Rotisería Pampa',
+    estado: 'preparing',
+    prioridad: 3,
+    desde: 'Depósito central, Av. Rivadavia 4200',
+    hasta: 'Los Andes 1900',
+    localidadDestino: 'Morón',
+    ventanaDesde: '2026-09-21T10:00:00.000Z',
+    ventanaHasta: '2026-09-21T14:00:00.000Z',
+    despachadoEn: null,
+    entregadoEn: null,
+    distanciaMetros: 24600,
+    transportista: null,
+    patente: null,
+    paradas: 1,
+    paradasCompletadas: 0,
+  },
+  {
+    id: 'env_007',
+    numero: 'ENV-0007',
+    trackingCode: 'TRK-9F2K7A07',
+    cliente: 'Farmacia Central',
+    estado: 'draft',
+    prioridad: 4,
+    desde: 'Depósito central, Av. Rivadavia 4200',
+    hasta: 'Rivadavia 9100',
+    localidadDestino: 'Ciudad Autónoma de Buenos Aires',
+    ventanaDesde: null,
+    ventanaHasta: null,
+    despachadoEn: null,
+    entregadoEn: null,
+    distanciaMetros: null,
+    transportista: null,
+    patente: null,
+    paradas: 1,
+    paradasCompletadas: 0,
+  },
+  {
+    id: 'env_008',
+    numero: 'ENV-0008',
+    trackingCode: 'TRK-9F2K7A08',
+    cliente: 'Verdulería Norte',
+    estado: 'cancelled',
+    prioridad: 5,
+    desde: 'Depósito central, Av. Rivadavia 4200',
+    hasta: 'Constituyentes 3400',
+    localidadDestino: 'Vicente López',
+    ventanaDesde: '2026-09-19T09:00:00.000Z',
+    ventanaHasta: '2026-09-19T13:00:00.000Z',
+    despachadoEn: null,
+    entregadoEn: null,
+    distanciaMetros: 15800,
+    transportista: null,
+    patente: null,
+    paradas: 1,
+    paradasCompletadas: 0,
+  },
+]
+
+export const paradas: Parada[] = [
+  { id: 'par_001', envioId: 'env_001', orden: 0, tipo: 'pickup', estado: 'completed', direccion: 'Av. Rivadavia 4200', localidad: 'Ciudad Autónoma de Buenos Aires', ventanaDesde: null, ventanaHasta: null, completadaEn: '2026-09-20T10:00:00.000Z' },
+  { id: 'par_002', envioId: 'env_001', orden: 1, tipo: 'delivery', estado: 'completed', direccion: 'Av. Siempre Viva 742', localidad: 'Lanús', ventanaDesde: '2026-09-20T13:00:00.000Z', ventanaHasta: '2026-09-20T18:00:00.000Z', completadaEn: '2026-09-20T15:30:00.000Z' },
+  { id: 'par_003', envioId: 'env_002', orden: 0, tipo: 'pickup', estado: 'completed', direccion: 'Av. Rivadavia 4200', localidad: 'Ciudad Autónoma de Buenos Aires', ventanaDesde: null, ventanaHasta: null, completadaEn: '2026-09-20T11:00:00.000Z' },
+  { id: 'par_004', envioId: 'env_002', orden: 1, tipo: 'delivery', estado: 'arrived', direccion: 'Ruta 9 km 42', localidad: 'Escobar', ventanaDesde: '2026-09-20T14:00:00.000Z', ventanaHasta: '2026-09-20T19:00:00.000Z', completadaEn: null },
+  { id: 'par_005', envioId: 'env_003', orden: 0, tipo: 'pickup', estado: 'completed', direccion: 'Camino de Cintura 1500', localidad: 'Lanús', ventanaDesde: null, ventanaHasta: null, completadaEn: '2026-09-20T12:00:00.000Z' },
+  { id: 'par_006', envioId: 'env_003', orden: 1, tipo: 'delivery', estado: 'pending', direccion: 'Belgrano 1220', localidad: 'Lanús', ventanaDesde: '2026-09-20T15:00:00.000Z', ventanaHasta: '2026-09-20T20:00:00.000Z', completadaEn: null },
+]
+
+export const vehiculos: Vehiculo[] = [
+  { id: 'veh_001', patente: 'AB 123 CD', tipo: 'Furgón', capacidadKg: 1500, transportista: 'Transportes Ríos', activo: true },
+  { id: 'veh_002', patente: 'EF 456 GH', tipo: 'Camión', capacidadKg: 8000, transportista: 'Transportes Ríos', activo: true },
+  { id: 'veh_003', patente: 'IJ 789 KL', tipo: 'Utilitario', capacidadKg: 800, transportista: 'Flota propia', activo: false },
+]
+
+export const incidencias: Incidencia[] = [
+  {
+    id: 'inc_001',
+    envioNumero: 'ENV-0004',
+    causa: 'Domicilio cerrado',
+    descripcion: 'Nadie atendió en el domicilio. Se reprograma para el día siguiente.',
+    gravedad: 'media',
+    resuelta: false,
+    fecha: '2026-09-20T14:00:00.000Z',
+  },
+  {
+    id: 'inc_002',
+    envioNumero: 'ENV-0002',
+    causa: 'Tránsito demorado',
+    descripcion: 'Demora por corte en la autopista. El conductor avisó al cliente.',
+    gravedad: 'baja',
+    resuelta: true,
+    fecha: '2026-09-20T13:10:00.000Z',
+  },
+]
+
+/**
+ * El historial de tracking.
+ *
+ * `clientEventId` queda en `null` para los eventos que cargó el sistema, y lleva el
+ * valor que la PWA del conductor habría mandado en los que vienen del móvil: es la
+ * clave con la que el motor deduplica los reintentos (`te_client_dedup`).
+ */
+export const eventosTracking: EventoTracking[] = [
+  { id: 'ev_001', envioId: 'env_001', estado: 'draft', codigo: 'created', descripcion: 'Envío creado', fecha: '2026-09-19T09:00:00.000Z', actor: 'user', requiereConfirmacion: false, confirmadoEn: null, clientEventId: null },
+  { id: 'ev_002', envioId: 'env_001', estado: 'in_transit', codigo: 'picked_up', descripcion: 'Retirado del depósito', fecha: '2026-09-20T10:00:00.000Z', actor: 'driver', requiereConfirmacion: false, confirmadoEn: null, clientEventId: 'cli_ev_001' },
+  { id: 'ev_003', envioId: 'env_001', estado: 'out_for_delivery', codigo: 'out_for_delivery', descripcion: 'En reparto', fecha: '2026-09-20T13:00:00.000Z', actor: 'driver', requiereConfirmacion: false, confirmadoEn: null, clientEventId: 'cli_ev_002' },
+  { id: 'ev_004', envioId: 'env_001', estado: 'delivered', codigo: 'delivered', descripcion: 'Entregado y firmado', fecha: '2026-09-20T15:30:00.000Z', actor: 'customer', requiereConfirmacion: true, confirmadoEn: '2026-09-20T15:30:00.000Z', clientEventId: null },
+  { id: 'ev_005', envioId: 'env_002', estado: 'draft', codigo: 'created', descripcion: 'Envío creado', fecha: '2026-09-20T08:00:00.000Z', actor: 'user', requiereConfirmacion: false, confirmadoEn: null, clientEventId: null },
+  { id: 'ev_006', envioId: 'env_002', estado: 'in_transit', codigo: 'picked_up', descripcion: 'Retirado del depósito', fecha: '2026-09-20T11:00:00.000Z', actor: 'driver', requiereConfirmacion: false, confirmadoEn: null, clientEventId: 'cli_ev_003' },
+  { id: 'ev_007', envioId: 'env_002', estado: 'out_for_delivery', codigo: 'out_for_delivery', descripcion: 'En reparto', fecha: '2026-09-20T13:30:00.000Z', actor: 'driver', requiereConfirmacion: false, confirmadoEn: null, clientEventId: 'cli_ev_004' },
+  { id: 'ev_008', envioId: 'env_003', estado: 'draft', codigo: 'created', descripcion: 'Envío creado', fecha: '2026-09-20T07:00:00.000Z', actor: 'user', requiereConfirmacion: false, confirmadoEn: null, clientEventId: null },
+  { id: 'ev_009', envioId: 'env_003', estado: 'in_transit', codigo: 'at_hub', descripcion: 'Llegó al centro de distribución', fecha: '2026-09-20T12:00:00.000Z', actor: 'driver', requiereConfirmacion: false, confirmadoEn: null, clientEventId: 'cli_ev_005' },
+  { id: 'ev_010', envioId: 'env_004', estado: 'draft', codigo: 'created', descripcion: 'Envío creado', fecha: '2026-09-20T07:30:00.000Z', actor: 'user', requiereConfirmacion: false, confirmadoEn: null, clientEventId: null },
+  { id: 'ev_011', envioId: 'env_004', estado: 'incident', codigo: 'incident', descripcion: 'No se pudo entregar: domicilio cerrado', fecha: '2026-09-20T14:00:00.000Z', actor: 'driver', requiereConfirmacion: true, confirmadoEn: null, clientEventId: 'cli_ev_006' },
+  { id: 'ev_012', envioId: 'env_005', estado: 'draft', codigo: 'created', descripcion: 'Envío creado', fecha: '2026-09-20T09:30:00.000Z', actor: 'user', requiereConfirmacion: false, confirmadoEn: null, clientEventId: null },
+  { id: 'ev_013', envioId: 'env_006', estado: 'draft', codigo: 'created', descripcion: 'Envío creado', fecha: '2026-09-20T09:00:00.000Z', actor: 'user', requiereConfirmacion: false, confirmadoEn: null, clientEventId: null },
+  { id: 'ev_014', envioId: 'env_007', estado: 'draft', codigo: 'created', descripcion: 'Envío creado', fecha: '2026-09-20T10:00:00.000Z', actor: 'user', requiereConfirmacion: false, confirmadoEn: null, clientEventId: null },
+  { id: 'ev_015', envioId: 'env_008', estado: 'draft', codigo: 'created', descripcion: 'Envío creado', fecha: '2026-09-20T08:30:00.000Z', actor: 'user', requiereConfirmacion: false, confirmadoEn: null, clientEventId: null },
+]
+
+export const confirmacionesEntrega: ConfirmacionEntrega[] = [
+  {
+    id: 'cnf_001',
+    envioId: 'env_001',
+    envioNumero: 'ENV-0001',
+    receptor: 'Marta Gómez',
+    documento: 'DNI 12.345.678',
+    firmaUrl: 'https://pod.control.ar/cnf_001/firma.png',
+    fotos: ['https://pod.control.ar/cnf_001/1.jpg'],
+    conforme: true,
+    observaciones: null,
+    confirmadaEn: '2026-09-20T15:30:00.000Z',
+  },
+  {
+    id: 'cnf_002',
+    envioId: 'env_002',
+    envioNumero: 'ENV-0002',
+    receptor: null,
+    documento: null,
+    firmaUrl: null,
+    fotos: [],
+    conforme: null,
+    observaciones: null,
+    confirmadaEn: null,
+  },
 ]
