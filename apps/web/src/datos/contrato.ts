@@ -13,7 +13,7 @@ import {
   PendienteSchema,
   ProductoListadoSchema,
   AuditoriaListadoSchema,
-  TareaListadoSchema,
+  TrabajoListadoSchema,
 } from '@control/contracts'
 
 /** Si el contrato de la ventana está cableado en el frontend (`listo`) o solo declarado (`pendiente`). */
@@ -46,13 +46,13 @@ export const CONTRATOS: Record<string, ContratoVentana> = {
   contabilidad: { ventanaId: 'contabilidad', endpoint: '/api/v1/contabilidad/asientos', esquema: AsientoListadoSchema, estado: 'listo' },
   fiscal: { ventanaId: 'fiscal', endpoint: '/api/v1/fiscal/determinacion', esquema: DeterminacionIvaSchema, estado: 'listo' },
   logistica: { ventanaId: 'logistica', endpoint: '/api/v1/logistica/envios', esquema: EnvioListadoSchema, estado: 'listo' },
-  equipo: { ventanaId: 'equipo', endpoint: '/api/v1/equipo/miembros', esquema: MiembroListadoSchema, estado: 'pendiente' },
+  equipo: { ventanaId: 'equipo', endpoint: '/api/v1/equipo/miembros', esquema: MiembroListadoSchema, estado: 'listo' },
   // Configuración no consume datos del servidor: su paleta y su plantilla son del
   // sistema de diseño, así que no hay endpoint que declarar. Se marca `listo` con el
   // esquema de la empresa, que es lo único que resolverá del backend.
   configuracion: { ventanaId: 'configuracion', endpoint: '/api/v1/configuracion/empresa', esquema: PendienteSchema, estado: 'listo' },
-  auditoria: { ventanaId: 'auditoria', endpoint: '/api/v1/auditoria/eventos', esquema: AuditoriaListadoSchema, estado: 'pendiente' },
-  tareas: { ventanaId: 'tareas', endpoint: '/api/v1/tareas/tareas', esquema: TareaListadoSchema, estado: 'pendiente' },
+  auditoria: { ventanaId: 'auditoria', endpoint: '/api/v1/auditoria/eventos', esquema: AuditoriaListadoSchema, estado: 'listo' },
+  tareas: { ventanaId: 'tareas', endpoint: '/api/v1/tareas/trabajos', esquema: TrabajoListadoSchema, estado: 'listo' },
 }
 
 /** Devuelve el contrato de una ventana o `null` si no está declarado. */

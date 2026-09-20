@@ -21,7 +21,7 @@ import type {
 } from './logistica.ts'
 import type { Miembro } from './gobierno.ts'
 import type { AuditoriaEvento } from './gobierno.ts'
-import type { Tarea } from './gobierno.ts'
+import type { EscenarioDeTrabajo } from './trabajos.ts'
 
 /**
  * Datos simulados que cumplen los esquemas del contrato.
@@ -644,24 +644,107 @@ export const auditoria: AuditoriaEvento[] = [
   },
 ]
 
-export const tareas: Tarea[] = [
+/**
+ * Las tareas programadas, como **escenarios** y no como fechas fijas.
+ *
+ * Los cuatro primeros son los jobs que el motor siembra
+ * (`db/migrations/0010_job_ledger.sql`), con su cadencia y su tolerancia reales. El
+ * quinto no está en el motor: es un job de ejemplo que **dejó de correr**, que es el caso
+ * que la ventana existe para mostrar —un job que falla deja un error, uno que dejó de
+ * correr no deja nada—.
+ *
+ * Las fechas no se guardan: se guarda **hace cuánto** corrió cada uno, y el adaptador
+ * simulado lo materializa contra el reloj de quien mira. Con fechas fijas, apenas pasara
+ * esa fecha todos los jobs aparecerían atrasados y la ventana dejaría de decir la verdad.
+ */
+const HORA = 3600_000
+const DIA = 24 * HORA
+
+export const trabajos: EscenarioDeTrabajo[] = [
   {
-    id: 'tk_001',
-    titulo: 'Conciliar cierre de septiembre',
-    estado: 'en_curso',
-    asignadoA: 'u_ana',
-    vence: '2026-09-30T00:00:00.000Z',
+    codigo: 'stock.reconciliation',
+    descripcion: 'Compara stock_levels contra la suma de stock_movements y reporta diferencias',
+    cadenciaMs: DIA,
+    toleranciaMs: 12 * HORA,
+    critico: true,
+    activo: true,
+    ultimaCorridaHaceMs: 6 * HORA,
+    duracionMs: 42_000,
+    estadoDeLaUltimaCorrida: 'succeeded',
+    host: 'worker-1',
+    error: null,
   },
   {
-    id: 'tk_002',
-    titulo: 'Revisar merma de depósito sur',
-    estado: 'abierta',
-    asignadoA: 'u_beto',
+    codigo: 'certificate.expiry',
+    descripcion: 'Alerta de vencimiento de certificados AFIP a 45, 30 y 15 días',
+    cadenciaMs: DIA,
+    toleranciaMs: 6 * HORA,
+    critico: true,
+    activo: true,
+    ultimaCorridaHaceMs: 8 * HORA,
+    duracionMs: 3_100,
+    estadoDeLaUltimaCorrida: 'succeeded',
+    host: 'worker-1',
+    error: null,
   },
   {
-    id: 'tk_003',
-    titulo: 'Cargar catálogo Q4',
-    estado: 'completada',
+    codigo: 'partition.maintenance',
+    descripcion: 'Crea las particiones de los próximos meses para tracking y auditoría',
+    cadenciaMs: 30 * DIA,
+    toleranciaMs: 3 * DIA,
+    critico: true,
+    activo: true,
+    // Una corrida viva: la ventana tiene que poder decir «lleva 20 minutos corriendo» y
+    // no confundirlo con un atraso.
+    ultimaCorridaHaceMs: 20 * 60_000,
+    duracionMs: null,
+    estadoDeLaUltimaCorrida: 'running',
+    host: 'worker-2',
+    error: null,
+  },
+  {
+    codigo: 'partition.retention',
+    descripcion: 'Purga particiones de posiciones GPS fuera de la ventana de retención',
+    cadenciaMs: 30 * DIA,
+    toleranciaMs: 3 * DIA,
+    critico: false,
+    activo: true,
+    // 35 días sobre una cadencia de 30 más 3 de tolerancia: **atrasado**. Es el estado que
+    // la ventana existe para mostrar —un job que dejó de correr no deja error, y el hueco
+    // se descubre cuando falta un dato—.
+    ultimaCorridaHaceMs: 35 * DIA,
+    duracionMs: 1_240_000,
+    estadoDeLaUltimaCorrida: 'succeeded',
+    host: 'worker-2',
+    error: null,
+  },
+  {
+    codigo: 'accounting.reconciliation',
+    descripcion: 'Verifica y reporta la proyección de saldos por cuenta y período',
+    cadenciaMs: DIA,
+    toleranciaMs: 12 * HORA,
+    critico: true,
+    activo: true,
+    // Falló hace tres días y no volvió a correr: es el caso que la ventana tiene que
+    // poner arriba, porque un job caído no se nota hasta que falta un dato.
+    ultimaCorridaHaceMs: 3 * DIA,
+    duracionMs: 8_500,
+    estadoDeLaUltimaCorrida: 'failed',
+    host: 'worker-1',
+    error: 'timeout al leer accounting.account_balances',
+  },
+  {
+    codigo: 'logistics.pod_cleanup',
+    descripcion: 'Depura las fotos de POD fuera de la ventana de retención',
+    cadenciaMs: 7 * DIA,
+    toleranciaMs: DIA,
+    critico: false,
+    activo: true,
+    ultimaCorridaHaceMs: null,
+    duracionMs: null,
+    estadoDeLaUltimaCorrida: 'skipped',
+    host: null,
+    error: null,
   },
 ]
 

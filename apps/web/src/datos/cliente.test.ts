@@ -15,6 +15,10 @@ import {
   MovimientoTesoreriaListadoSchema,
   OrdenCompraListadoSchema,
   PeriodoListadoSchema,
+  TrabajoListadoSchema,
+  MiembroListadoSchema,
+  AuditoriaListadoSchema,
+  estadoDeTrabajo,
 } from '@control/contracts'
 
 const cliente = new SimuladoCliente()
@@ -345,4 +349,69 @@ test('reabrirPeriodo exige motivo y deja el rastro', async () => {
   assert.equal(conMotivo.periodo.cerradoEn, null, 'el cierre anterior se limpia')
   assert.equal(conMotivo.periodo.motivoReapertura, 'Faltó imputar un flete')
   assert.equal(conMotivo.periodo.reabiertoPor, 'Ana Dueña')
+})
+
+// ---------------------------------------------------------------------------
+// Gobierno y plataforma (F9)
+// ---------------------------------------------------------------------------
+
+test('listarMiembros valida y trae los permisos por persona', async () => {
+  const r = await cliente.listarMiembros({ empresaSlug: 'andes', pagina: 1, porPagina: 50 })
+  assert.deepEqual(MiembroListadoSchema.parse(r), r)
+  assert.ok(r.items.length > 0)
+  assert.ok(r.items.every((m) => m.permisos.length > 0), 'cada miembro tiene sus permisos')
+})
+
+test('listarAuditoria valida y ordena por fecha', async () => {
+  const r = await cliente.listarAuditoria({
+    empresaSlug: 'andes',
+    pagina: 1,
+    porPagina: 50,
+    orden: { campo: 'fecha', dir: 'desc' },
+  })
+  assert.deepEqual(AuditoriaListadoSchema.parse(r), r)
+  const fechas = r.items.map((e) => e.fecha)
+  assert.deepEqual(fechas, [...fechas].sort().reverse(), 'del más reciente al más antiguo')
+})
+
+test('listarTrabajos deriva el estado contra el reloj que recibe', async () => {
+  const AHORA = Date.parse('2026-09-20T14:00:00.000Z')
+  const r = await cliente.listarTrabajos({ empresaSlug: 'andes', pagina: 1, porPagina: 50, ahoraMs: AHORA })
+  assert.deepEqual(TrabajoListadoSchema.parse(r), r)
+  assert.ok(r.items.length >= 4, 'los cuatro jobs que el motor siembra tienen que estar')
+
+  // El estado no viene en los datos: se deriva. Y como el reloj entra por parámetro, la
+  // misma consulta con otro reloj tiene que dar otro resultado — que es lo que permite
+  // probar el atraso sin esperar.
+  const estados = new Set(r.items.map((t) => estadoDeTrabajo(t, AHORA)))
+  assert.ok(estados.has('al_dia') || estados.has('corriendo'), 'algo tiene que estar sano')
+  assert.ok(estados.has('fallando') || estados.has('atrasado'), 'y algo tiene que requerir atención')
+})
+
+test('el estado depende del desfase y no del reloj: el mundo simulado está siempre vivo', async () => {
+  // Es la propiedad que hace útil al adaptador simulado. Si los escenarios guardaran
+  // fechas fijas, en cuanto pasara la fecha del fixture **todos** los jobs aparecerían
+  // atrasados y la ventana dejaría de decir la verdad. Como guardan el desfase
+  // («corrió hace 6 horas»), el estado se mantiene sea cual sea el momento en que se
+  // mire — y por eso el reloj se cancela: el atraso se mide contra el mismo `ahoraMs`
+  // con el que se materializó.
+  const AHORA = Date.parse('2026-09-20T14:00:00.000Z')
+  const DIA = 24 * 3_600_000
+
+  const base = await cliente.listarTrabajos({ empresaSlug: 'andes', pagina: 1, porPagina: 50, ahoraMs: AHORA })
+  const lejos = await cliente.listarTrabajos({
+    empresaSlug: 'andes',
+    pagina: 1,
+    porPagina: 50,
+    ahoraMs: AHORA + 90 * DIA,
+  })
+
+  const estados = (items: typeof base.items, ahora: number) =>
+    items.map((t) => `${t.codigo}:${estadoDeTrabajo(t, ahora)}`).join('|')
+
+  assert.equal(
+    estados(lejos.items, AHORA + 90 * DIA),
+    estados(base.items, AHORA),
+    'noventa días después, cada job sigue en el mismo estado',
+  )
 })

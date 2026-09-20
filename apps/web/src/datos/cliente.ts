@@ -28,6 +28,9 @@ import type {
   ResultadoTransferencia,
   TrackingPublico,
   TransferenciaListado,
+  TrabajoListado,
+  MiembroListado,
+  AuditoriaListado,
 } from '@control/contracts'
 import {
   AsientoListadoSchema,
@@ -50,12 +53,16 @@ import {
   ReposicionListadoSchema,
   TrackingPublicoSchema,
   TransferenciaListadoSchema,
+  TrabajoListadoSchema,
+  MiembroListadoSchema,
+  AuditoriaListadoSchema,
   aplicarRecuento,
   aplicarTransferencia,
   cerrarPeriodo as cerrarPeriodoPuro,
   conciliar,
   deltaDeMovimiento,
   envioPorTracking,
+  materializarTrabajo,
   proyeccionPublica,
   reabrirPeriodo as reabrirPeriodoPuro,
 } from '@control/contracts'
@@ -79,6 +86,9 @@ import {
   envios,
   paradas,
   eventosTracking,
+  miembros,
+  auditoria,
+  trabajos,
 } from '@control/contracts/fixtures'
 
 /** Parámetros comunes de una consulta de lista. */
@@ -159,6 +169,18 @@ export interface ApiClient {
    * tiene que poder distinguir «no existe» de «existe sin eventos».
    */
   obtenerTrackingPublico(empresaSlug: string, token: string): Promise<TrackingPublico | null>
+
+  // --- Gobierno y plataforma (F9) ---
+  listarMiembros(p: ParametrosLista): Promise<MiembroListado>
+  listarAuditoria(p: ParametrosLista): Promise<AuditoriaListado>
+  /**
+   * Las tareas programadas.
+   *
+   * Recibe `ahoraMs` **por parámetro** y no lee el reloj: el estado de un job —al día,
+   * atrasado, fallando— depende de cuándo se mire, y un cliente que decidiera la hora por
+   * su cuenta haría que la ventana y la suite no pudieran ponerse de acuerdo.
+   */
+  listarTrabajos(p: ParametrosLista & { ahoraMs: number }): Promise<TrabajoListado>
 }
 
 /** Pequeño motor de consulta en memoria sobre los fixtures. */
@@ -641,6 +663,63 @@ export class SimuladoCliente implements ApiClient {
       ),
     )
   }
+
+  // --- Gobierno y plataforma (F9) ---
+
+  async listarMiembros(p: ParametrosLista): Promise<MiembroListado> {
+    const r = consultar(
+      miembros,
+      p,
+      (x) => `${x.nombre} ${x.rol} ${x.estado}`,
+      (x, campo) => {
+        if (campo === 'nombre' || campo === 'rol' || campo === 'estado') return x[campo]
+        if (campo === 'permisos') return x.permisos.length
+        return undefined
+      },
+    )
+    return MiembroListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarAuditoria(p: ParametrosLista): Promise<AuditoriaListado> {
+    const r = consultar(
+      auditoria,
+      p,
+      (x) => `${x.actor} ${x.accion} ${x.entidad} ${x.detalle ?? ''}`,
+      (x, campo) => {
+        if (campo === 'fecha') return x.fecha
+        if (campo === 'actor' || campo === 'accion' || campo === 'entidad') return x[campo]
+        return undefined
+      },
+    )
+    return AuditoriaListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
+
+  async listarTrabajos(p: ParametrosLista & { ahoraMs: number }): Promise<TrabajoListado> {
+    // Los escenarios se materializan contra el reloj que entra por parámetro: así el
+    // mundo simulado está siempre «vivo» y la ventana muestra estados distintos en vez de
+    // todos atrasados en cuanto pasa la fecha de un fixture.
+    const materializados = trabajos.map((escenario) => materializarTrabajo(escenario, p.ahoraMs))
+    const r = consultar(
+      materializados,
+      p,
+      (x) => `${x.codigo} ${x.descripcion}`,
+      (x, campo) => {
+        if (campo === 'codigo' || campo === 'descripcion') return x[campo]
+        if (campo === 'critico') return x.critico ? 1 : 0
+        return undefined
+      },
+    )
+    return TrabajoListadoSchema.parse({
+      items: r.items,
+      paginacion: { pagina: p.pagina, porPagina: p.porPagina, total: r.total, paginas: r.paginas },
+    })
+  }
 }
 
 /**
@@ -778,6 +857,21 @@ export class HttpCliente implements ApiClient {
     if (res.status === 404) return null
     if (!res.ok) throw new Error(`Error ${res.status} al consultar el tracking público`)
     return TrackingPublicoSchema.parse(await res.json())
+  }
+
+  listarMiembros(p: ParametrosLista): Promise<MiembroListado> {
+    return this.pedir('/equipo/miembros', p, MiembroListadoSchema)
+  }
+  listarAuditoria(p: ParametrosLista): Promise<AuditoriaListado> {
+    return this.pedir('/auditoria/eventos', p, AuditoriaListadoSchema)
+  }
+  /**
+   * Sobre HTTP, `ahoraMs` no viaja: el estado de un job lo decide el servidor, que es
+   * quien tiene el reloj y quien sabe cuándo corrió cada cosa. El parámetro existe para
+   * que el adaptador simulado sea reproducible, no para mandarlo por la red.
+   */
+  listarTrabajos(p: ParametrosLista & { ahoraMs: number }): Promise<TrabajoListado> {
+    return this.pedir('/tareas/trabajos', p, TrabajoListadoSchema)
   }
 }
 

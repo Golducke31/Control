@@ -31,15 +31,12 @@ export type AuditoriaEvento = z.infer<typeof AuditoriaEventoSchema>
 export const AuditoriaListadoSchema = coleccionSchema(AuditoriaEventoSchema)
 export type AuditoriaListado = z.infer<typeof AuditoriaListadoSchema>
 
-/** Tarea de gobierno (ventana Tareas). */
-export const TareaSchema = z.object({
-  id: z.string(),
-  titulo: z.string(),
-  estado: z.enum(['abierta', 'en_curso', 'completada', 'cancelada']),
-  asignadoA: z.string().optional(),
-  vence: z.string().optional(),
-})
-export type Tarea = z.infer<typeof TareaSchema>
-
-export const TareaListadoSchema = coleccionSchema(TareaSchema)
-export type TareaListado = z.infer<typeof TareaListadoSchema>
+/**
+ * **Las tareas programadas no viven acá.** La ventana Tareas muestra los jobs del motor
+ * (`ops.jobs` / `ops.job_runs`) —con su cadencia, su última corrida y su atraso—, y su
+ * contrato es `trabajos.ts`. Este archivo tuvo un `TareaSchema` que modelaba una tarea de
+ * gobierno —un pendiente con título y vencimiento— y **ninguna ventana lo usaba**: el
+ * nombre coincidía con el de la ventana y el contenido no. Se eliminó en F9 en vez de
+ * dejarlo como esquema huérfano, porque un esquema que nadie consume y cuyo nombre
+ * sugiere lo contrario es peor que no tenerlo.
+ */

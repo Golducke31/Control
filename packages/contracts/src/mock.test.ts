@@ -25,6 +25,7 @@ import {
   ParadaSchema,
   VehiculoSchema,
 } from './logistica.ts'
+import { EscenarioDeTrabajoSchema } from './trabajos.ts'
 import { MiembroSchema } from './gobierno.ts'
 import {
   productos,
@@ -54,7 +55,7 @@ import {
   confirmacionesEntrega,
   miembros,
   auditoria,
-  tareas,
+  trabajos,
 } from './fixtures.ts'
 
 test('los productos simulados validan contra el esquema', () => {
@@ -99,13 +100,17 @@ test('el sobre de colección de productos es válido', () => {
   assert.equal(lista.items.length, productos.length)
 })
 
-test('documentos, miembros y tareas validan', () => {
+test('documentos, miembros y auditoría validan', () => {
   for (const d of documentosVenta) DocumentoVentaSchema.parse(d)
   for (const m of miembros) MiembroSchema.parse(m)
   for (const a of auditoria) {
     assert.ok(a.fecha.startsWith('2026'), 'fecha de auditoría presente')
   }
-  assert.ok(tareas.length >= 1)
+})
+
+test('los escenarios de tareas programadas validan contra su esquema', () => {
+  for (const t of trabajos) EscenarioDeTrabajoSchema.parse(t)
+  assert.ok(trabajos.length >= 4, 'los cuatro jobs que el motor siembra tienen que estar')
 })
 
 test('un producto con estado inexistente es rechazado (negativo)', () => {

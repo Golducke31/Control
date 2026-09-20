@@ -1,17 +1,18 @@
+import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { getCliente } from '@/datos/cliente'
+import { EquipoCliente } from './EquipoCliente'
 
-import { VentanaPendiente } from '@/componentes/VentanaPendiente'
-import { ventanaPorId } from '@/rutas'
+export const metadata: Metadata = { title: 'Equipo' }
 
-/**
- * La ventana se declara en el mapa de rutas, con su permiso, su grupo y sus subrutas.
- * El contenido llega en la fase que el mapa indica; hasta entonces esta página muestra
- * lo que el mapa dice de ella, para que la arquitectura sea verificable a simple vista.
- */
-const ventana = ventanaPorId('equipo')
+/** Equipo (F9). Server Component: primera página de miembros como `initialData`. */
+export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const inicial = await getCliente().listarMiembros({ empresaSlug: slug, pagina: 1, porPagina: 10 })
 
-export const metadata: Metadata = { title: ventana.titulo }
-
-export default function Pagina() {
-  return <VentanaPendiente ventana={ventana} />
+  return (
+    <Suspense>
+      <EquipoCliente slug={slug} initialData={inicial} />
+    </Suspense>
+  )
 }
