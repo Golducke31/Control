@@ -1,0 +1,51 @@
+import { VENTANAS } from '../rutas.ts'
+import {
+  ProductoListadoSchema,
+  NivelStockListadoSchema,
+  DocumentoVentaListadoSchema,
+  MiembroListadoSchema,
+  AuditoriaListadoSchema,
+  TareaListadoSchema,
+  PendienteSchema,
+} from '@control/contracts'
+
+/** Si el contrato de la ventana está cableado en el frontend (`listo`) o solo declarado (`pendiente`). */
+export type EstadoDeContrato = 'listo' | 'pendiente'
+
+/**
+ * Contrato declarado de una ventana.
+ *
+ * Es la única fuente del endpoint y del esquema que la ventana consume. La suite
+ * `contrato.test.ts` lo cruza contra `VENTANAS`: si una ventana del mapa no aparece
+ * acá, o su endpoint no es una ruta `/api/v1`, el test falla. Así el menú y el
+ * contrato no pueden diverger (la misma disciplina que el mapa de rutas).
+ */
+export interface ContratoVentana {
+  ventanaId: string
+  endpoint: string
+  /** Esquema Zod de la colección principal de la ventana. */
+  esquema: { safeParse: (valor: unknown) => unknown }
+  estado: EstadoDeContrato
+}
+
+export const CONTRATOS: Record<string, ContratoVentana> = {
+  panel: { ventanaId: 'panel', endpoint: '/api/v1/panel/resumen', esquema: PendienteSchema, estado: 'pendiente' },
+  ventas: { ventanaId: 'ventas', endpoint: '/api/v1/ventas/documentos', esquema: DocumentoVentaListadoSchema, estado: 'pendiente' },
+  facturacion: { ventanaId: 'facturacion', endpoint: '/api/v1/facturacion/comprobantes', esquema: PendienteSchema, estado: 'pendiente' },
+  catalogo: { ventanaId: 'catalogo', endpoint: '/api/v1/catalogo/productos', esquema: ProductoListadoSchema, estado: 'listo' },
+  stock: { ventanaId: 'stock', endpoint: '/api/v1/stock/niveles', esquema: NivelStockListadoSchema, estado: 'pendiente' },
+  compras: { ventanaId: 'compras', endpoint: '/api/v1/compras/ordenes', esquema: PendienteSchema, estado: 'pendiente' },
+  tesoreria: { ventanaId: 'tesoreria', endpoint: '/api/v1/tesoreria/movimientos', esquema: PendienteSchema, estado: 'pendiente' },
+  contabilidad: { ventanaId: 'contabilidad', endpoint: '/api/v1/contabilidad/asientos', esquema: PendienteSchema, estado: 'pendiente' },
+  fiscal: { ventanaId: 'fiscal', endpoint: '/api/v1/fiscal/comprobantes', esquema: PendienteSchema, estado: 'pendiente' },
+  logistica: { ventanaId: 'logistica', endpoint: '/api/v1/logistica/envios', esquema: PendienteSchema, estado: 'pendiente' },
+  equipo: { ventanaId: 'equipo', endpoint: '/api/v1/equipo/miembros', esquema: MiembroListadoSchema, estado: 'pendiente' },
+  configuracion: { ventanaId: 'configuracion', endpoint: '/api/v1/configuracion/empresa', esquema: PendienteSchema, estado: 'pendiente' },
+  auditoria: { ventanaId: 'auditoria', endpoint: '/api/v1/auditoria/eventos', esquema: AuditoriaListadoSchema, estado: 'pendiente' },
+  tareas: { ventanaId: 'tareas', endpoint: '/api/v1/tareas/tareas', esquema: TareaListadoSchema, estado: 'pendiente' },
+}
+
+/** Devuelve el contrato de una ventana o `null` si no está declarado. */
+export function contratoDeVentana(ventanaId: string): ContratoVentana | null {
+  return CONTRATOS[ventanaId] ?? null
+}

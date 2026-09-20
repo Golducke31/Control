@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, MouseEventHandler, ReactNode } from 'react'
 
 import { cn } from './cn'
 
@@ -51,6 +51,8 @@ export interface PropsDeBoton extends ButtonHTMLAttributes<HTMLButtonElement> {
   sufijo?: ReactNode
   /** Muestra un indicador y bloquea la interacción sin desmontar el botón. */
   cargando?: boolean
+  /** Si se pasa, el botón se renderiza como un enlace `<a>` con la misma apariencia. */
+  href?: string
 }
 
 export function Boton({
@@ -63,23 +65,38 @@ export function Boton({
   children,
   disabled,
   type = 'button',
+  href,
+  onClick,
   ...resto
 }: PropsDeBoton) {
+  const clases = cn(
+    'inline-flex select-none items-center justify-center rounded-[var(--control-radio)] font-medium',
+    'transition-shadow duration-[var(--control-dur-rapida)]',
+    'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco',
+    'disabled:cursor-not-allowed disabled:opacity-50',
+    VARIANTES[variante],
+    TAMANOS[tamano],
+    HOVER[variante],
+    className,
+  )
+
+  if (href !== undefined) {
+    return (
+      <a href={href} className={clases} onClick={onClick as unknown as MouseEventHandler<HTMLAnchorElement>}>
+        {cargando ? <IndicadorDeCarga /> : prefijo}
+        {children}
+        {sufijo}
+      </a>
+    )
+  }
+
   return (
     <button
       type={type}
       disabled={disabled ?? cargando}
       aria-busy={cargando || undefined}
-      className={cn(
-        'inline-flex select-none items-center justify-center rounded-[var(--control-radio)] font-medium',
-        'transition-shadow duration-[var(--control-dur-rapida)]',
-        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco',
-        'disabled:cursor-not-allowed disabled:opacity-50',
-        VARIANTES[variante],
-        TAMANOS[tamano],
-        HOVER[variante],
-        className,
-      )}
+      className={clases}
+      onClick={onClick}
       {...resto}
     >
       {cargando ? <IndicadorDeCarga /> : prefijo}

@@ -9,7 +9,7 @@
 - [`PLAN-ERP-MULTIEMPRESA.md`](PLAN-ERP-MULTIEMPRESA.md) — brechas funcionales y fases E0–E9. **Este plan se ejecuta en paralelo a E7**, no lo reemplaza.
 - `prototype/index.html` — prototipo de diseño que este plan reemplaza.
 
-> **Estado de ejecución.** Las fases **F1 · Fundaciones** y **F2 · Identidad y acceso** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. Lo que sigue es **F3 · Sistema de datos**.
+> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso** y **F3 · Sistema de datos** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. Lo que sigue es **F4 · Operación diaria**.
 >
 > Tres ajustes respecto de lo planeado, decididos al implementar y documentados donde corresponden:
 > 1. `packages/contracts` y `packages/graficos` se crean en **F3** y **F4**, con su primer consumidor real, no en F1: un paquete sin consumidor es un lastre que nadie mantiene.
@@ -885,9 +885,23 @@ Ingreso (Google SSO y credenciales), verificación en dos pasos, recuperación, 
 **Puerta:** un usuario sin permiso no ve el ítem ni entra por URL; el cambio de empresa no deja datos de la anterior (test explícito); `logistics.enabled=false` responde 404.
 
 ### F3 · Sistema de datos
-`packages/contracts` completo. Cliente HTTP con validación Zod. Adaptador simulado con MSW. Hooks de consulta por dominio. Suite que compara los enums del contrato contra `pg_enum`. Suite que valida los datos simulados contra los esquemas. `DataTable`, filtros en URL, los cinco estados obligatorios.
+`packages/contracts` completo. Cliente con validación Zod en el borde. Adaptador simulado en proceso. Hooks de consulta por dominio. Suite que compara los enums del contrato contra `pg_enum`. Suite que valida los datos simulados contra los esquemas. `DataTable`, filtros en URL, los cinco estados obligatorios.
+
+**Un alcance que se movió, y por qué.** El plan listaba el adaptador simulado con **MSW**. No se usó MSW en F3: el `SimuladoCliente` resuelve en proceso y valida la salida con Zod (validación en el borde, §5.4) sin tocar la red. La razón es práctica —`node --test` no necesita un servidor de interceptación para verificar la lógica de consulta/filtro/orden/paginación, y lo que importa en F3 es que *los datos que entran a la app cumplan el contrato*, lo cual lo garantiza el `parse`, no el transporte—. MSW queda para **F9**, cuando convenga interceptar `fetch` real en los tests de componente de flujo. Cambiar `NEXT_PUBLIC_API_MODE=http` conecta el `HttpCliente` real sin tocar un solo componente.
+
+**Ventana cableada en F3.** `catalogo` es la primera con contrato `listo` (endpoint `/api/v1/catalogo/productos`, `ProductoListadoSchema`). Las otras trece quedan con contrato `pendiente` (endpoint declarado + `PendienteSchema`) para que el mapa de rutas y el de contratos no puedan diverger; la suite `contrato.test.ts` lo cruza en ambos sentidos.
 
 **Puerta:** toda ventana declara su contrato; los enums coinciden con el motor; recargar restaura filtros, página y orden (A12).
+
+| Criterio de la puerta | Evidencia | Resultado |
+| --- | --- | --- |
+| Toda ventana declara su contrato | `apps/web/src/datos/contrato.test.ts` — cruza `VENTANAS` × `CONTRATOS` en ambos sentidos; falla si falta o sobra | ✅ |
+| Los enums coinciden con el motor | `packages/contracts/src/enums-sync.test.ts` — extrae `CREATE TYPE … AS ENUM` de `db/migrations` y compara bidireccionalmente (19 enums / 96 valores) | ✅ |
+| Recargar restaura filtros, página y orden (A12) | `apps/web/src/datos/useUrlState.ts` — `texto`/`pagina`/`porPagina`/`orden` viven en `searchParams`, nunca en Zustand; `router.replace` los escribe | ✅ (manual en Catálogo) |
+| Los datos que entran cumplen el contrato | `SimuladoCliente` y `HttpCliente.pedir` parsean cada respuesta con Zod antes de entregar | ✅ |
+| Los cinco estados obligatorios | `packages/ui/src/DataTable.tsx` — error / carga / vacío-por-filtro / vacío / éxito | ✅ |
+
+**Verificación mecánica.** `npm run verify` (gates de migración, workflow, tokens y cobertura de typecheck) en verde; typecheck de los 5 workspaces en verde; `node --test` en `packages/contracts` (10) y `apps/web` (46) en verde; `next build` de `@control/web` exitoso.
 
 ### F4 · Operación diaria
 Panel, Ventas (las 15 sub-rutas) y Facturación (las 5). Es la fase que ejercita **la cadena completa de documentos** que se construyó en E6: cotización → pedido → remito → factura → devolución, con las transiciones válidas en la barra de acciones y el estado derivado visible.

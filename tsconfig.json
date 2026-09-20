@@ -34,6 +34,7 @@
     { "path": "./apps/api" },
     { "path": "./apps/web" },
     { "path": "./packages/tokens" },
-    { "path": "./packages/ui" }
+    { "path": "./packages/ui" },
+    { "path": "./packages/contracts" }
   ]
 }

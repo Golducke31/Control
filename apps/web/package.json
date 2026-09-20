@@ -13,6 +13,7 @@
     "lint:tokens": "node ../../tools/check-token-literals.mjs"
   },
   "dependencies": {
+    "@control/contracts": "*",
     "@control/tokens": "*",
     "@control/ui": "*",
     "@tanstack/react-query": "^5.103.1",

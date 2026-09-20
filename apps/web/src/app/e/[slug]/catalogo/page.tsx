@@ -1,17 +1,29 @@
+import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { getCliente } from '@/datos/cliente'
+import { CatalogoCliente } from './CatalogoCliente'
 
-import { VentanaPendiente } from '@/componentes/VentanaPendiente'
-import { ventanaPorId } from '@/rutas'
+export const metadata: Metadata = { title: 'Catálogo' }
 
 /**
- * La ventana se declara en el mapa de rutas, con su permiso, su grupo y sus subrutas.
- * El contenido llega en la fase que el mapa indica; hasta entonces esta página muestra
- * lo que el mapa dice de ella, para que la arquitectura sea verificable a simple vista.
+ * Catálogo (F3).
+ *
+ * Server Component: resuelve los datos iniciales con el cliente y los hidrata en
+ * React Query como `initialData`, así la primera pintura no tiene cascada de
+ * peticiones (§5.3). El estado de la vista (filtros, página, orden) vive en la URL
+ * y lo maneja el cliente, de modo que recargar restaura la vista exacta (A12).
+ *
+ * El cliente simulado es en proceso en F3; con el backend, `getCliente()` devuelve
+ * la implementación real y nada de esto cambia.
  */
-const ventana = ventanaPorId('catalogo')
+export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const cliente = getCliente()
+  const inicial = await cliente.listarProductos({ empresaSlug: slug, pagina: 1, porPagina: 10 })
 
-export const metadata: Metadata = { title: ventana.titulo }
-
-export default function Pagina() {
-  return <VentanaPendiente ventana={ventana} />
+  return (
+    <Suspense>
+      <CatalogoCliente slug={slug} initialData={inicial} />
+    </Suspense>
+  )
 }

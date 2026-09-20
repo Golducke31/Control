@@ -1,0 +1,6 @@
+export * from './enums.ts'
+export * from './comun.ts'
+export * from './catalogo.ts'
+export * from './stock.ts'
+export * from './ventas.ts'
+export * from './gobierno.ts'

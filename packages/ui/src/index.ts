@@ -26,3 +26,6 @@ export type { PropsDeEstadoVacio } from './EstadoVacio'
 
 export { EncabezadoDeVentana } from './EncabezadoDeVentana'
 export type { PropsDeEncabezadoDeVentana } from './EncabezadoDeVentana'
+
+export { DataTable } from './DataTable'
+export type { Columna, PropsDataTable, AccionVacia } from './DataTable'

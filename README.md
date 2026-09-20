@@ -1479,6 +1479,9 @@ npm test --workspace @control/tokens   # vuelve a medir los 38 pares de contrast
 | `npm run verify:tokens-sync` | Que los artefactos generados se separen de su fuente |
 | `npm run verify:typecheck-coverage` | Un workspace que nadie verifica |
 | `npm test --workspace @control/web` | Una ventana en el menú sin su página, un permiso inexistente, una ruta repetida |
+| `npm test --workspace @control/contracts` | Un enum del contrato que no coincide con `pg_enum`, un dato simulado que no cumple su esquema |
+
+**El sistema de datos (F3).** `packages/contracts` define los esquemas Zod que reflejan los `pg_enum` del motor; la suite `enums-sync` los compara contra las migraciones de `db/` en ambos sentidos, así el contrato y la base no pueden diverger. `apps/web` consume datos por medio de `ApiClient`: en F3 es `SimuladoCliente` (resuelve en proceso y valida cada respuesta con Zod en el borde); con `NEXT_PUBLIC_API_MODE=http` se conecta al `HttpCliente` real contra `/api/v1` sin tocar un componente. El estado de cada ventana (filtro, página, orden) vive en la URL, no en estado cliente, de modo que recargar restaura la vista (regla A12).
 
 ### 12.6 Prototipo
 
@@ -1505,7 +1508,7 @@ Estos puntos están identificados y no resueltos en esta entrega:
 - **Generación de PDF.** `PdfExportService` produce el HTML completo con la identidad aplicada; falta el *renderer* con Chromium headless (Playwright).
 - **Definición de rutas HTTP.** Los servicios están implementados con sus dependencias inyectadas; resta el cableado de los handlers de Fastify.
 - **Tests de integración** contra AFIP homologación con un CUIT de prueba.
-- **Frontend de producción.** **F1 · Fundaciones** y **F2 · Identidad y acceso** están hechas: el sistema de diseño en `packages/tokens`, los componentes base en `packages/ui`, y `apps/web` con la carcasa, las catorce ventanas, y la sesión (ingreso SSO/credenciales + 2FA, recuperación, invitación, selector de empresa, impersonación). Faltan F3 a F9 —datos y el contenido de cada ventana— según [`docs/PLAN-FRONTEND-PRODUCCION.md`](docs/PLAN-FRONTEND-PRODUCCION.md), que también lleva el catálogo de ~90 endpoints que el frontend necesita del backend.
+- **Frontend de producción.** **F1 · Fundaciones**, **F2 · Identidad y acceso** y **F3 · Sistema de datos** están hechas: el sistema de diseño en `packages/tokens`, los componentes base en `packages/ui`, `packages/contracts` (esquemas Zod espejo de `pg_enum`), `apps/web` con la carcasa, las catorce ventanas, la sesión (ingreso SSO/credenciales + 2FA, recuperación, invitación, selector de empresa, impersonación), el `ApiClient` con adaptador simulado validado en el borde, la `DataTable` con los cinco estados y los filtros en URL, y la ventana **Catálogo** como primer consumidor cableado. Faltan F4 a F9 —el contenido de cada ventana— según [`docs/PLAN-FRONTEND-PRODUCCION.md`](docs/PLAN-FRONTEND-PRODUCCION.md), que también lleva el catálogo de ~90 endpoints que el frontend necesita del backend.
 - **Reconciliación de stock.** El job `stock.reconciliation` está implementado en `job-runner.ts` (cron `30 4 * * *`) y **reporta sin autocorregir**: la divergencia es un síntoma y no se puede saber cuál de las dos vistas es la equivocada. Queda pendiente decidir si la diferencia debe generar una alerta además de quedar en el ledger.
 - **Scheduler de infraestructura.** El ledger y el runner están implementados; falta el disparador externo (Kubernetes CronJob o el servicio gestionado que se elija) que invoque cada job según `JOB_SCHEDULE`. Mientras tanto, los jobs se pueden ejecutar a mano y quedan registrados igual.
 - **Alertas de jobs atrasados.** `ops.v_job_health` expone `is_overdue`, pero falta conectar esa vista al sistema de alertas.
