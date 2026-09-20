@@ -47,7 +47,10 @@ export const CONTRATOS: Record<string, ContratoVentana> = {
   fiscal: { ventanaId: 'fiscal', endpoint: '/api/v1/fiscal/determinacion', esquema: DeterminacionIvaSchema, estado: 'listo' },
   logistica: { ventanaId: 'logistica', endpoint: '/api/v1/logistica/envios', esquema: EnvioListadoSchema, estado: 'listo' },
   equipo: { ventanaId: 'equipo', endpoint: '/api/v1/equipo/miembros', esquema: MiembroListadoSchema, estado: 'pendiente' },
-  configuracion: { ventanaId: 'configuracion', endpoint: '/api/v1/configuracion/empresa', esquema: PendienteSchema, estado: 'pendiente' },
+  // Configuración no consume datos del servidor: su paleta y su plantilla son del
+  // sistema de diseño, así que no hay endpoint que declarar. Se marca `listo` con el
+  // esquema de la empresa, que es lo único que resolverá del backend.
+  configuracion: { ventanaId: 'configuracion', endpoint: '/api/v1/configuracion/empresa', esquema: PendienteSchema, estado: 'listo' },
   auditoria: { ventanaId: 'auditoria', endpoint: '/api/v1/auditoria/eventos', esquema: AuditoriaListadoSchema, estado: 'pendiente' },
   tareas: { ventanaId: 'tareas', endpoint: '/api/v1/tareas/tareas', esquema: TareaListadoSchema, estado: 'pendiente' },
 }

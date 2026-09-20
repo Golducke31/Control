@@ -57,3 +57,21 @@ export {
   SOMBRAS,
 } from './geometria.ts'
 export type { NombreDeDensidad } from './geometria.ts'
+
+export {
+  PALETAS_DE_INQUILINO,
+  PRIMARIOS_DE_INQUILINO,
+  paletaDeInquilino,
+  paletaPorSlug,
+  tintaDelPrototipo,
+} from './paletas.ts'
+export type { PaletaDeInquilino, PrimarioDeInquilino } from './paletas.ts'
+
+export {
+  LIMITES,
+  PLANTILLAS,
+  plantillaPorClave,
+  variablesDeTema,
+  verificarPlantilla,
+} from './plantillas.ts'
+export type { BarraLateral, Densidad, PlantillaDeRubro } from './plantillas.ts'

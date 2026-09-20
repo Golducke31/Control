@@ -1,17 +1,23 @@
+import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { ConfiguracionCliente, temaInicial } from './ConfiguracionCliente'
 
-import { VentanaPendiente } from '@/componentes/VentanaPendiente'
-import { ventanaPorId } from '@/rutas'
+export const metadata: Metadata = { title: 'Configuración' }
 
 /**
- * La ventana se declara en el mapa de rutas, con su permiso, su grupo y sus subrutas.
- * El contenido llega en la fase que el mapa indica; hasta entonces esta página muestra
- * lo que el mapa dice de ella, para que la arquitectura sea verificable a simple vista.
+ * Configuración (F8).
+ *
+ * El tema inicial sale de la empresa de la URL: la paleta es un dato del inquilino, así
+ * que la ventana abre con la suya y no con una por defecto. No hay consulta de datos:
+ * las paletas y las plantillas son del sistema de diseño, no del servidor.
  */
-const ventana = ventanaPorId('configuracion')
+export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const { paleta } = temaInicial(slug)
 
-export const metadata: Metadata = { title: ventana.titulo }
-
-export default function Pagina() {
-  return <VentanaPendiente ventana={ventana} />
+  return (
+    <Suspense>
+      <ConfiguracionCliente slug={slug} paletaInicial={paleta} />
+    </Suspense>
+  )
 }

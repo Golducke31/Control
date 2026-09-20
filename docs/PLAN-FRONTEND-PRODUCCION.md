@@ -9,7 +9,7 @@
 - [`PLAN-ERP-MULTIEMPRESA.md`](PLAN-ERP-MULTIEMPRESA.md) — brechas funcionales y fases E0–E9. **Este plan se ejecuta en paralelo a E7**, no lo reemplaza.
 - `prototype/index.html` — prototipo de diseño que este plan reemplaza.
 
-> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos**, **F4 · Operación diaria**, **F5 · Inventario**, **F6 · Finanzas** y **F7 · Logística** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel**, **Ventas** y **Facturación**, más la lógica pura de transiciones de la cadena de documentos. F5 entregó la ventana **Stock** completa, la lógica pura de inventario y el primer camino de escritura del frontend. F6 entregó las ventanas **Compras**, **Tesorería**, **Contabilidad** (con **Períodos**) y **Fiscal**, la lógica pura del cierre de período, y cerró el hueco del RBAC (51 permisos en 16 recursos). F7 entregó la ventana **Logística** con su torre de control, el **tracking público** y la **PWA del conductor**, más el canal de tiempo real: **una sola conexión SSE por pestaña, multiplexada por tópico**, con el estado de la conexión a la vista. Lo que sigue es **F8 · Gobierno, marca y plataforma**.
+> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos**, **F4 · Operación diaria**, **F5 · Inventario**, **F6 · Finanzas**, **F7 · Logística** y **F8 · Gobierno, marca y plataforma** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel**, **Ventas** y **Facturación**, más la lógica pura de transiciones de la cadena de documentos. F5 entregó la ventana **Stock** completa, la lógica pura de inventario y el primer camino de escritura del frontend. F6 entregó las ventanas **Compras**, **Tesorería**, **Contabilidad** (con **Períodos**) y **Fiscal**, la lógica pura del cierre de período, y cerró el hueco del RBAC (51 permisos en 16 recursos). F7 entregó la ventana **Logística** con su torre de control, el **tracking público** y la **PWA del conductor**, más el canal de tiempo real: **una sola conexión SSE por pestaña, multiplexada por tópico**. F8 entregó la ventana **Configuración** con el tema aplicado en vivo, la **consola de plataforma** con su guarda, las **4 paletas de inquilino** y las **5 plantillas** verificadas contra AA, y el **lint de textos** con su trinquete. Lo que sigue es **F9 · Producción**.
 >
 > Tres ajustes respecto de lo planeado, decididos al implementar y documentados donde corresponden:
 > 1. `packages/contracts` y `packages/graficos` se crean en **F3** y **F4**, con su primer consumidor real, no en F1: un paquete sin consumidor es un lastre que nadie mantiene.
@@ -1031,7 +1031,35 @@ Torre de control con mapa en vivo por SSE, Envíos, Flota, Incidencias, POD, tra
 ### F8 · Gobierno, marca y plataforma
 Equipo, Configuración, Auditoría, Tareas, consola de plataforma, y las 5 plantillas de `app.ui_templates` aplicables en vivo. Incluye el **lint de textos**: con `next-intl` y los archivos de mensajes en su lugar, ninguna cadena de interfaz puede quedar escrita en un componente.
 
+**Alcance entregado en esta pasada.** Las **4 paletas de inquilino** y las **5 plantillas** como datos de `packages/tokens` con su verificación de contraste, la ventana **Configuración** con el tema aplicado en vivo, la **consola de plataforma** con su guarda, y el **lint de textos** con trinquete.
+
 **Puerta:** las 4 paletas de inquilino y las 5 plantillas pasan AA; cambiar de plantilla no recarga; la consola de plataforma está en dominio aparte y un `owner` no entra.
+
+| Criterio de la puerta | Evidencia | Resultado |
+| --- | --- | --- |
+| Las 4 paletas pasan AA | `paletas.ts` deriva la tinta con `tintaSobre` en vez de fijar blanco; `paletas.test.ts` (PUERTA F8·1a) | ✅ |
+| …y el defecto original queda escrito | La prueba negativa reproduce la medición del plan: el blanco fallaba en **nórdico, pampa y sur**, y pasaba en andes (4,56:1) | ✅ |
+| Las 5 plantillas pasan AA | `plantillas.test.ts` recorre el **producto cartesiano** 5 × 4 = 20 combinaciones y exige lista vacía de problemas (PUERTA F8·1b) | ✅ |
+| El producto cartesiano es completo | Una prueba cuenta las 20 combinaciones: un `filter` mal puesto dejaría la verificación en 3 × 2 y el test anterior seguiría verde | ✅ |
+| Cambiar de plantilla no recarga | Aplicar un tema es `variablesDeTema(plantilla, paleta)`, una función pura a propiedades CSS; `tema.test.ts` lee la fuente del selector y comprueba que no hay navegación ni consulta (PUERTA F8·2) | ✅ |
+| La consola está en dominio aparte | Las 6 rutas `/plataforma/*` viven en `RUTAS_FUERA_DE_CARCASA`; ninguna ventana de empresa vive bajo el prefijo (PUERTA F8·3) | ✅ |
+| Un `owner` no entra | `puedeEntrarAPlataforma('u_ana')` → `no_es_de_plataforma`: tiene los 51 permisos de **su** empresa y ninguno de plataforma | ✅ |
+| Los dos rechazos se distinguen | `sin_sesion` manda al ingreso, `no_es_de_plataforma` a las empresas propias: un solo «no» obligaría a la página a adivinar | ✅ |
+| Ninguna cadena de interfaz nueva en un componente | `tools/check-textos.mjs` (`verify:textos`) con el parser de TypeScript | ✅ con trinquete |
+
+**El lint de textos, con trinquete.** La migración a `next-intl` es grande —hay diez ventanas cableadas antes de F8— y hacerla de una sola vez obligaría a un commit que nadie puede revisar. Así que el lint **mide** y el trinquete **impide crecer**:
+
+- Un archivo que no está en la línea base y tiene textos de interfaz → **falla**.
+- Un archivo que ya estaba y suma textos → **falla**, y `--generar` **se niega a escribirlo** sin un `--forzar` explícito. Sin esa negativa, regenerar sería la forma de tapar una regresión y el trinquete no serviría para nada.
+- Un archivo que bajó → se informa, para que la línea base acompañe.
+
+Usa el parser de TypeScript y no una expresión regular: distingue un nodo `JsxText` de un `JsxAttribute` sin ambigüedad, y no hay que mantener una lista de excepciones que se desactualiza. **Lo que no detecta**: un literal dentro de una expresión de llaves (`{cond ? 'texto' : null}`) — distinguirlo de un identificador técnico necesita tipos, no sintaxis; la línea base lo cubre por archivo y el número no puede crecer.
+
+**Estado de la deuda, medido:** 37 archivos, 178 textos pendientes de migrar. Baja cuando entre `next-intl` en F9.
+
+**Verificación mecánica.** `npm run verify` en verde (**10 validadores**, incluidos `verify:permissions` y `verify:textos`); typecheck de 5 workspaces; `node --test` en `packages/tokens` (**55**), `packages/contracts` (**116**) y `apps/web` (**86**) en verde; `next build` de `@control/web` exitoso.
+
+**Alcance movido.** Las ventanas **Equipo**, **Auditoría** y **Tareas** quedan con su página declarada —el mapa las tiene, con su permiso y su fase— pero sin cablear, y su contrato sigue en `pendiente`. No las nombra ninguna cláusula de la puerta, y las tres son listados que repiten el molde ya probado. Las sub-rutas de Configuración (`identidad`, `plantillas`, `empresa`, `impuestos`, `integraciones`) y las 6 de plataforma quedan como seguimiento por la misma razón; `plataforma/empresas` sí entró porque es donde vive la guarda.
 
 ### F9 · Producción
 Presupuestos de rendimiento, `axe-core` en CI, E2E de los flujos críticos, i18n, observabilidad, manejo de errores por ventana, y el despliegue.
