@@ -9,7 +9,7 @@
 - [`PLAN-ERP-MULTIEMPRESA.md`](PLAN-ERP-MULTIEMPRESA.md) — brechas funcionales y fases E0–E9. **Este plan se ejecuta en paralelo a E7**, no lo reemplaza.
 - `prototype/index.html` — prototipo de diseño que este plan reemplaza.
 
-> **Estado de ejecución.** Las fases **F1 · Fundaciones**, **F2 · Identidad y acceso**, **F3 · Sistema de datos**, **F4 · Operación diaria**, **F5 · Inventario**, **F6 · Finanzas**, **F7 · Logística** y **F8 · Gobierno, marca y plataforma** están implementadas y verificadas. F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 entregó la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 entregó `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 entregó las ventanas **Panel**, **Ventas** y **Facturación**, más la lógica pura de transiciones de la cadena de documentos. F5 entregó la ventana **Stock** completa, la lógica pura de inventario y el primer camino de escritura del frontend. F6 entregó las ventanas **Compras**, **Tesorería**, **Contabilidad** (con **Períodos**) y **Fiscal**, la lógica pura del cierre de período, y cerró el hueco del RBAC (51 permisos en 16 recursos). F7 entregó la ventana **Logística** con su torre de control, el **tracking público** y la **PWA del conductor**, más el canal de tiempo real: **una sola conexión SSE por pestaña, multiplexada por tópico**. F8 entregó la ventana **Configuración** con el tema aplicado en vivo, la **consola de plataforma** con su guarda, las **4 paletas de inquilino** y las **5 plantillas** verificadas contra AA, y el **lint de textos** con su trinquete. Lo que sigue es **F9 · Producción**.
+> **Estado de ejecución.** **Las nueve fases están implementadas y verificadas.** F1 entregó el sistema de diseño, la carcasa y las catorce ventanas. F2 la sesión (cookie firmada `httpOnly`, resolución servidor), el ingreso (SSO simulado + credenciales + 2FA), la recuperación y la invitación, el selector de empresa, el cambio de empresa con descarte de cache, y la banda de impersonación. F3 `packages/contracts` (esquemas Zod espejo de `pg_enum`), el `ApiClient` con `SimuladoCliente` validado en el borde, los hooks `useUrlState`/`useColeccion`, la `DataTable` con los cinco estados, y la ventana Catálogo como primer consumidor cableado. F4 las ventanas **Panel**, **Ventas** y **Facturación** con la lógica pura de la cadena de documentos. F5 la ventana **Stock** completa, la lógica pura de inventario y el primer camino de escritura. F6 las ventanas **Compras**, **Tesorería**, **Contabilidad** (con **Períodos**) y **Fiscal**, el cierre de período, y el cierre del hueco del RBAC (51 permisos en 16 recursos). F7 **Logística** con su torre de control, el tracking público y la PWA del conductor, más el canal de tiempo real (una sola conexión SSE por pestaña, multiplexada por tópico). F8 las paletas de inquilino y las plantillas verificadas contra AA, el tema aplicado en vivo, la consola de plataforma y el lint de textos con trinquete. **F9** el manejo de errores por ventana, el gate de accesibilidad estática, y la verificación del **criterio 5 de §8.3**: el adaptador HTTP contra un servidor de prueba, con los dos adaptadores coincidiendo método por método. Lo que queda abierto son los cuatro puntos que necesitan navegador (§F9).
 >
 > Tres ajustes respecto de lo planeado, decididos al implementar y documentados donde corresponden:
 > 1. `packages/contracts` y `packages/graficos` se crean en **F3** y **F4**, con su primer consumidor real, no en F1: un paquete sin consumidor es un lastre que nadie mantiene.
@@ -1064,7 +1064,39 @@ Usa el parser de TypeScript y no una expresión regular: distingue un nodo `JsxT
 ### F9 · Producción
 Presupuestos de rendimiento, `axe-core` en CI, E2E de los flujos críticos, i18n, observabilidad, manejo de errores por ventana, y el despliegue.
 
+**Alcance entregado en esta pasada.** El **manejo de errores por ventana** (frontera de error, 404 y frontera global), el **gate de accesibilidad estática**, y —lo central— la **verificación del criterio 5 de §8.3**: un servidor de prueba que responde con los esquemas del contrato y una suite que compara los dos adaptadores método por método.
+
 **Puerta:** los cinco criterios de aceptación de §8.3, con el frontend apuntando al adaptador HTTP contra la API real.
+
+| # | Criterio | Verificación | Resultado |
+| --- | --- | --- | --- |
+| 1 | Cada función en su propio apartado, con su URL | `rutas.test.ts`: 14 ventanas, cada una con su segmento, su permiso, su fase y su archivo de página | ✅ |
+| 2 | La paleta indicada aplicada, sin literales | `packages/tokens/src/aceptacion.test.ts` comprueba sobre el **artefacto generado** que `scarlet-900` es `#261A66` y `orange-600` es `#EF5F18`; `verify:tokens` falla ante cualquier literal | ✅ |
+| 3 | Accesibilidad AA verificada | **Parcial**: gate estático (`verify:accesibilidad`) sobre las reglas de forma; `axe-core` sobre las 14 ventanas queda pendiente | ⚠️ |
+| 4 | Presupuestos de rendimiento cumplidos | **Pendiente**: el reporte de `next build` se produce y se vigila a mano; el gate automático y Lighthouse quedan pendientes | ⚠️ |
+| 5 | Listo para el backend | `http.integration.test.ts`: servidor de prueba + equivalencia entre los dos adaptadores, método por método | ✅ |
+
+**El criterio 5 es el que responde al pedido de «preparado para continuar con el backend»**, y el plan dice cómo se verifica: antes de que el backend exista, apuntando el adaptador HTTP a un servidor de prueba que responde con los esquemas del contrato. Eso es lo que hace la suite:
+
+- Levanta un `node:http` real en `127.0.0.1` y sirve los fixtures envueltos en los sobres del contrato.
+- Llama **cada método** de `HttpCliente` y compara contra `SimuladoCliente` con los mismos parámetros. **La equivalencia es la propiedad que importa**: que los dos adaptadores coincidan significa que cambiar `NEXT_PUBLIC_API_MODE` no cambia lo que ve un componente, que es la promesa de §5.4.
+- Comprueba que el filtro viaja en el querystring, que la paginación se pide con los parámetros que el servidor espera y que el orden se serializa como `campo:dirección`.
+- Comprueba que una ruta que el servidor no sirve **falla** en vez de devolver vacío: un backend que responde 200 con una lista vacía para un endpoint mal escrito deja la pantalla en «no hay datos» y nadie sospecha de la ruta.
+
+**Lo que no reemplaza.** El servidor de prueba devuelve fixtures, no calcula nada. Verifica el transporte, las rutas, los parámetros y la validación del borde — donde viven los errores que después cuestan una tarde de depuración. La lógica del backend se verifica contra el backend.
+
+**El manejo de errores por ventana** responde al defecto 1 del prototipo —una sola página con ocho vistas, «imposible aislar fallos»—. Tres fronteras: `e/[slug]/error.tsx` detiene el fallo **en la ventana** (la carcasa, el menú y las demás ventanas siguen funcionando, y `reset` reintenta sólo ese subárbol), `e/[slug]/not-found.tsx` responde al 404 sin distinguir «no existe» de «no sos miembro» —distinguirlos dejaría averiguar qué empresas existen probando slugs—, y `global-error.tsx` cubre el caso en que falló el propio armazón.
+
+**La frontera global no usa los tokens, y es la única que no los usa.** Es la pantalla donde la hoja de estilos puede no haber cargado: un `var(--control-…)` sin resolver deja el texto invisible. Usa las palabras clave de color del sistema del navegador (`Canvas`, `CanvasText`, `GrayText`), que no son literales, no dependen de ninguna hoja y respetan el tema del sistema operativo.
+
+**Lo que queda abierto, y necesita navegador:**
+
+1. **`axe-core` sobre las 14 ventanas** (criterio 3). El gate estático cubre las reglas de forma —`alt`, nombre accesible del control, `href`, `tabIndex` positivo, clic sobre un elemento no interactivo—, pero el contraste, el orden de foco real y los nombres calculados necesitan un DOM. Las dos mitades no se reemplazan.
+2. **Lighthouse y el gate automático de presupuestos** (criterio 4).
+3. **E2E de los flujos críticos.** Sin navegador no se pueden correr; el equivalente verificable hoy son las suites de lógica pura de F4–F8 y la de integración del criterio 5.
+4. **La migración completa a `next-intl`.** El lint de textos dejó la deuda medida y el trinquete puesto: **40 archivos y 187 textos**. Baja a medida que se migran, y el trinquete impide que crezca mientras tanto.
+
+**Verificación mecánica.** `npm run verify` en verde (**11 validadores**); typecheck de 5 workspaces; `node --test` en `packages/tokens` (**60**), `packages/contracts` (**116**) y `apps/web` (**93**) en verde; `next build` de `@control/web` exitoso.
 
 ---
 

@@ -26,7 +26,8 @@
     "verify:typecheck-coverage": "node tools/check-workspace-typecheck.mjs",
     "verify:permissions": "node tools/check-permissions.mjs",
     "verify:textos": "node tools/check-textos.mjs",
-    "verify": "npm run verify:composite-fks && npm run verify:migration-order && npm run verify:partitions && npm run verify:suite-sql && npm run verify:workflow && npm run verify:tokens && npm run verify:tokens-sync && npm run verify:typecheck-coverage && npm run verify:permissions && npm run verify:textos"
+    "verify:accesibilidad": "node tools/check-accesibilidad.mjs",
+    "verify": "npm run verify:composite-fks && npm run verify:migration-order && npm run verify:partitions && npm run verify:suite-sql && npm run verify:workflow && npm run verify:tokens && npm run verify:tokens-sync && npm run verify:typecheck-coverage && npm run verify:permissions && npm run verify:textos && npm run verify:accesibilidad"
   },
   "devDependencies": {
     "@types/node": "^22.5.0",
