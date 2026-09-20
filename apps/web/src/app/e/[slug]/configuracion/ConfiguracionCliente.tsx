@@ -4,7 +4,7 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { EncabezadoDeVentana, Boton, Insignia } from '@control/ui'
 import { PALETAS_DE_INQUILINO, PLANTILLAS, plantillaPorClave, variablesDeTema } from '@control/tokens'
-import type { PaletaDeInquilino, PlantillaDeRubro } from '@control/tokens'
+import type { PaletaDeInquilino } from '@control/tokens'
 
 /**
  * Configuración · Identidad y plantillas (F8).
@@ -191,10 +191,4 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
       <dd className="mt-0.5 text-principal">{valor}</dd>
     </div>
   )
-}
-
-/** La plantilla y la paleta con las que la ventana abre: las de la empresa actual. */
-export function temaInicial(slug: string): { paleta: string; plantilla: PlantillaDeRubro } {
-  const paleta = PALETAS_DE_INQUILINO.some((p) => p.slug === slug) ? slug : (PALETAS_DE_INQUILINO[0]?.slug ?? 'andes')
-  return { paleta, plantilla: plantillaPorClave('retail-glass') ?? PLANTILLAS[0]! }
 }
