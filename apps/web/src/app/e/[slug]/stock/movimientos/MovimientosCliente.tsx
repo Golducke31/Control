@@ -104,7 +104,7 @@ export function MovimientosCliente({
         campoOrden: 'cantidad',
         ordenable: true,
         cuerpo: (m) => (
-          <span className={m.cantidad < 0 ? 'tabular-nums text-peligro' : 'tabular-nums text-exito'}>
+          <span className={m.cantidad < 0 ? 'tabular-nums text-peligro-tinta' : 'tabular-nums text-exito-tinta'}>
             {numeroConSigno(m.cantidad)}
           </span>
         ),

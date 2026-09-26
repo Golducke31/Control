@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { getCliente } from '@/datos/cliente'
+import type { SearchParams } from '@/datos/parametros'
+import { parametrosDeLista } from '@/datos/parametros'
 import { VentasCliente } from './VentasCliente'
 
 export const metadata: Metadata = { title: 'Ventas' }
@@ -12,10 +14,17 @@ export const metadata: Metadata = { title: 'Ventas' }
  * hidrata en React Query como `initialData`. El estado de la vista vive en la URL
  * (A12); recargar restaura filtros, página y orden.
  */
-export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+export default async function Pagina({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>
+  searchParams: Promise<SearchParams>
+}) {
   const { slug } = await params
+  const sp = await searchParams
   const cliente = getCliente()
-  const inicial = await cliente.listarDocumentosVenta({ empresaSlug: slug, pagina: 1, porPagina: 10 })
+  const inicial = await cliente.listarDocumentosVenta({ empresaSlug: slug, ...parametrosDeLista(sp) })
 
   return (
     <Suspense>

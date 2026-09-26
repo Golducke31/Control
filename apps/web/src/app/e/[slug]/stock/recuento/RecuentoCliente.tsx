@@ -161,7 +161,7 @@ export function RecuentoCliente({
           }
           const previa = previsualizar(n)
           if (previa === null) return <span className="text-xs text-terciario">sin contar</span>
-          if (!previa.ok) return <span className="text-xs text-peligro">{previa.motivo}</span>
+          if (!previa.ok) return <span className="text-xs text-peligro-tinta">{previa.motivo}</span>
           return (
             <span className={previa.delta === 0 ? 'text-xs text-terciario' : 'text-xs text-secundario'}>
               {previa.tipo}
@@ -222,7 +222,7 @@ export function RecuentoCliente({
       />
 
       {error !== null && (
-        <p className="rounded-[var(--control-radio)] bg-peligro-suave px-3 py-2 text-sm text-peligro">{error}</p>
+        <p className="rounded-[var(--control-radio)] bg-peligro-suave px-3 py-2 text-sm text-peligro-tinta">{error}</p>
       )}
 
       <DataTable<NivelStock>

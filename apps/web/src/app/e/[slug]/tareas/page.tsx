@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { getCliente } from '@/datos/cliente'
+import type { SearchParams } from '@/datos/parametros'
+import { parametrosDeLista } from '@/datos/parametros'
 import { TareasCliente } from './TareasCliente'
 
 export const metadata: Metadata = { title: 'Tareas programadas' }
@@ -14,10 +16,17 @@ export const metadata: Metadata = { title: 'Tareas programadas' }
  * entre el HTML y la hidratación: es el desajuste clásico de una fecha en un componente
  * cliente.
  */
-export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+export default async function Pagina({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>
+  searchParams: Promise<SearchParams>
+}) {
   const { slug } = await params
+  const sp = await searchParams
   const ahoraMs = Date.now()
-  const inicial = await getCliente().listarTrabajos({ empresaSlug: slug, pagina: 1, porPagina: 50, ahoraMs })
+  const inicial = await getCliente().listarTrabajos({ empresaSlug: slug, ...parametrosDeLista(sp), ahoraMs })
 
   return (
     <Suspense>

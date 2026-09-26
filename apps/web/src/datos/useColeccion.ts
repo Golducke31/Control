@@ -45,5 +45,14 @@ export function useColeccion<T>(opts: {
     queryFn: () => consultar(cliente, { empresaSlug, texto, pagina, porPagina, orden }),
     initialData,
     placeholderData: keepPreviousData,
+    /**
+     * El cliente **siempre** reconcilia con el servidor al montar.
+     *
+     * Sin esto, `initialData` cuenta como dato recién traído y la consulta no se vuelve a
+     * pedir: la pantalla se quedaba con lo que el servidor pintó en la primera carga —que
+     * puede ser otra página, sin filtro y sin orden— y el filtro de la URL no tenía ningún
+     * efecto. `initialData` es para la primera pintura, no para decidir qué es la verdad.
+     */
+    refetchOnMount: 'always',
   })
 }

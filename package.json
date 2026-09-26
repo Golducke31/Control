@@ -28,6 +28,7 @@
     "verify:textos": "node tools/check-textos.mjs",
     "verify:accesibilidad": "node tools/check-accesibilidad.mjs",
     "verify:fronteras": "node tools/check-fronteras.mjs",
+    "verify:presupuestos": "node tools/check-presupuestos.mjs",
     "verify": "npm run verify:composite-fks && npm run verify:migration-order && npm run verify:partitions && npm run verify:suite-sql && npm run verify:workflow && npm run verify:tokens && npm run verify:tokens-sync && npm run verify:typecheck-coverage && npm run verify:permissions && npm run verify:textos && npm run verify:accesibilidad && npm run verify:fronteras"
   },
   "devDependencies": {

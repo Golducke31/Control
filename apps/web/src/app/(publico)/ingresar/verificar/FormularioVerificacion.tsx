@@ -39,8 +39,20 @@ export function FormularioVerificacion({ desafio }: { desafio: string }) {
   return (
     <form
       onSubmit={enviar}
+      /*
+        El `action` y el campo oculto existen para el envío que **no** maneja React.
+        El HTML llega antes que el JavaScript: en esa ventana, un `<form>` sin `action` que
+        se envía lo procesa el navegador, y un envío nativo va a la ruta **sin la query
+        string** — así que el desafío se perdía y la pantalla respondía «No hay una
+        verificación en curso» con la clave correcta, justo después de venir del ingreso.
+        Con el desafío también en un campo, un envío nativo vuelve a esta misma pantalla con
+        el desafío intacto y la persona sólo tiene que volver a escribir el código.
+      */
+      action="/ingresar/verificar"
+      method="get"
       className="flex w-full max-w-sm flex-col gap-4 rounded-[var(--control-radio)] border border-borde-sutil bg-tarjeta p-6 shadow-sm"
     >
+      <input type="hidden" name="d" value={desafio} />
       <div>
         <h1 className="font-titulos text-xl font-semibold text-principal">Verificación en dos pasos</h1>
         <p className="mt-1 text-sm text-secundario">

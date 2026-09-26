@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { getCliente } from '@/datos/cliente'
+import type { SearchParams } from '@/datos/parametros'
+import { parametrosDeLista } from '@/datos/parametros'
 import { MovimientosCliente } from './MovimientosCliente'
 
 export const metadata: Metadata = { title: 'Movimientos' }
@@ -12,12 +14,19 @@ export const metadata: Metadata = { title: 'Movimientos' }
  * depósito no viene en el movimiento —el motor guarda el `warehouse_id`—, así que se
  * resuelve acá una vez y se pasa como mapa, en vez de pedirlo por fila.
  */
-export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+export default async function Pagina({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>
+  searchParams: Promise<SearchParams>
+}) {
   const { slug } = await params
+  const sp = await searchParams
   const cliente = getCliente()
 
   const [inicial, depositos] = await Promise.all([
-    cliente.listarMovimientos({ empresaSlug: slug, pagina: 1, porPagina: 10 }),
+    cliente.listarMovimientos({ empresaSlug: slug, ...parametrosDeLista(sp) }),
     cliente.listarDepositos({ empresaSlug: slug, pagina: 1, porPagina: 500 }),
   ])
 

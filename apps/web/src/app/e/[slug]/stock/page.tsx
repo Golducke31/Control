@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { getCliente } from '@/datos/cliente'
+import type { SearchParams } from '@/datos/parametros'
+import { parametrosDeLista } from '@/datos/parametros'
 import { StockCliente } from './StockCliente'
 import type { ResumenDeStock } from './StockCliente'
 
@@ -14,12 +16,19 @@ export const metadata: Metadata = { title: 'Stock' }
  * página visible—. La primera página viaja como `initialData` a React Query, así que
  * la pintura inicial no tiene cascada de peticiones (§5.3).
  */
-export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+export default async function Pagina({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>
+  searchParams: Promise<SearchParams>
+}) {
   const { slug } = await params
+  const sp = await searchParams
   const cliente = getCliente()
 
   const [inicial, todos, depositos, reposicion] = await Promise.all([
-    cliente.listarNiveles({ empresaSlug: slug, pagina: 1, porPagina: 10 }),
+    cliente.listarNiveles({ empresaSlug: slug, ...parametrosDeLista(sp) }),
     cliente.listarNiveles({ empresaSlug: slug, pagina: 1, porPagina: 500 }),
     cliente.listarDepositos({ empresaSlug: slug, pagina: 1, porPagina: 500 }),
     cliente.listarReposicion({ empresaSlug: slug, pagina: 1, porPagina: 500 }),

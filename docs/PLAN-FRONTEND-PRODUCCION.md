@@ -1091,14 +1091,21 @@ Presupuestos de rendimiento, `axe-core` en CI, E2E de los flujos críticos, i18n
 
 **La frontera global no usa los tokens, y es la única que no los usa.** Es la pantalla donde la hoja de estilos puede no haber cargado: un `var(--control-…)` sin resolver deja el texto invisible. Usa las palabras clave de color del sistema del navegador (`Canvas`, `CanvasText`, `GrayText`), que no son literales, no dependen de ninguna hoja y respetan el tema del sistema operativo.
 
-**Lo que queda abierto, y necesita navegador:**
+**Lo que queda abierto.** De los cuatro puntos que necesitaban navegador, tres están resueltos y el cuarto queda con su plan:
 
-1. **`axe-core` sobre las 14 ventanas** (criterio 3). El gate estático cubre las reglas de forma —`alt`, nombre accesible del control, `href`, `tabIndex` positivo, clic sobre un elemento no interactivo—, pero el contraste, el orden de foco real y los nombres calculados necesitan un DOM. Las dos mitades no se reemplazan.
-2. **Lighthouse y el gate automático de presupuestos** (criterio 4).
-3. **E2E de los flujos críticos.** Sin navegador no se pueden correr; el equivalente verificable hoy son las suites de lógica pura de F4–F8 y la de integración del criterio 5.
-4. **La migración completa a `next-intl`.** El lint de textos dejó la deuda medida y el trinquete puesto: **40 archivos y 187 textos**. Baja a medida que se migran, y el trinquete impide que crezca mientras tanto.
+1. ~~`axe-core` sobre las 14 ventanas~~ — **hecho.** `npm run test:a11y` corre `axe-core` sobre las 18 pantallas (14 ventanas + ingreso, tracking público, panel del conductor) con las etiquetas `wcag2a/2aa/21a/21aa`. Encontró dos defectos sistémicos y los dos se arreglaron; el gate se vio fallar antes de dejarlo.
+2. ~~Gate automático de presupuestos~~ — **hecho, en su mitad verificable sin servidor.** `npm run verify:presupuestos` lee la tabla del build y falla si una ruta o el chunk compartido superan `tools/presupuestos.json`. Queda pendiente la mitad de **Lighthouse**, que necesita un servidor de producción levantado y mide métricas de laboratorio (LCP, CLS, TBT) que el peso del bundle no captura.
+3. ~~E2E de los flujos críticos~~ — **hecho.** `npm run test:flujos` recorre dieciséis flujos con navegador: el ingreso completo con los dos factores, el recuento, el bloqueo optimista de la transferencia, el cierre y la reapertura de período, el tema sin recargar, la regla A12 y las dos rutas públicas. Encontró **tres defectos** que ninguna otra verificación veía (§8.3).
+4. **La migración completa a `next-intl`.** El lint de textos dejó la deuda medida y el trinquete puesto: **44 archivos y 199 textos**, todos en `apps/web/src`. Baja a medida que se migran, y el trinquete impide que crezca mientras tanto.
 
-**Verificación mecánica.** `npm run verify` en verde (**11 validadores**); typecheck de 5 workspaces; `node --test` en `packages/tokens` (**60**), `packages/contracts` (**116**) y `apps/web` (**93**) en verde; `next build` de `@control/web` exitoso.
+**Dos trampas del entorno que los E2E obligaron a resolver**, y que conviene no volver a pisar:
+
+- **Playwright respeta `HTTP_PROXY`** en su propio cliente HTTP —el que sondea si el servidor está listo—, y este entorno define un proxy local que responde **404** para `localhost`. El sondeo fallaba, Playwright intentaba levantar un segundo servidor sobre un puerto ocupado, y el error hablaba de un `Timed out waiting … from config.webServer` que no mencionaba el proxy. Se excluye el host local antes de que sondee.
+- **Interactuar antes de la hidratación.** El HTML llega antes que el JavaScript: en esa ventana un `<form>` sin `action` lo envía el navegador —perdiendo la query string, que es como se rompía el 2FA— y un `onClick` no hace nada. Los E2E esperan a que React haya tomado el elemento (`esperarHidratacion`), y el formulario del segundo factor además lleva el desafío en un campo oculto para que un envío nativo degrade a «volvé a escribir el código» en vez de a una pantalla sin contexto.
+
+**Verificación mecánica.** `npm run verify` en verde (**12 validadores**); typecheck de 5 workspaces; `node --test` en `packages/tokens` (**60**), `packages/contracts` (**134**) y `apps/web` (**97**) en verde; `npm run test:a11y` (**18/18**) y `npm run test:flujos` (**16/16**) en verde con navegador; `npm run verify:presupuestos` sobre el build; `next build` de `@control/web` exitoso.
+
+> **El build y el servidor de desarrollo no conviven en este entorno.** Los dos escriben `.next`, y en Windows el servidor en marcha mantiene el archivo `.next/trace` bloqueado: el build muere con `EPERM` y el mensaje no menciona al culpable. Hay que detener el servidor de desarrollo antes de compilar. En CI no pasa —no hay servidor de desarrollo—, pero en una máquina de trabajo sí.
 
 ---
 
@@ -1132,15 +1139,24 @@ Es la lección que dejó el CI del backend, donde dos jobs no podían pasar nunc
 
 ### 8.3 Criterios de aceptación
 
-| # | Criterio | Verificación |
-|---|---|---|
-| 1 | Cada función en su propio apartado, con su URL y sus gráficos | Recorrido de las 14 ventanas: ninguna depende del desplazamiento para llegar a otra función |
-| 2 | La paleta indicada aplicada, sin literales | Suite de tokens + inspección de que `scarlet-900` es `#261A66` y `orange-600` es `#EF5F18` |
-| 3 | Accesibilidad AA verificada | `axe-core` en verde en las 14 ventanas + recorrido manual con teclado |
-| 4 | Presupuestos de rendimiento cumplidos | Reporte de `next build` + Lighthouse |
-| 5 | Listo para el backend | Cambiar `NEXT_PUBLIC_API_MODE` a `http` y que la aplicación arranque contra la API real sin tocar componentes |
+| # | Criterio | Verificación | Estado |
+|---|---|---|---|
+| 1 | Cada función en su propio apartado, con su URL y sus gráficos | Recorrido de las 14 ventanas: ninguna depende del desplazamiento para llegar a otra función | ✅ `rutas.test.ts` |
+| 2 | La paleta indicada aplicada, sin literales | Suite de tokens + inspección de que `scarlet-900` es `#261A66` y `orange-600` es `#EF5F18` | ✅ verificado sobre el artefacto generado |
+| 3 | Accesibilidad AA verificada | `axe-core` en verde en las 14 ventanas + recorrido manual con teclado | ✅ **`axe-core` con navegador** (`npm run test:a11y`, 18 pantallas). El recorrido con teclado sigue siendo manual |
+| 4 | Presupuestos de rendimiento cumplidos | Reporte de `next build` + Lighthouse | ⚠️ **parcial**: `npm run verify:presupuestos` verifica el peso del build; Lighthouse queda pendiente |
+| 5 | Listo para el backend | Cambiar `NEXT_PUBLIC_API_MODE` a `http` y que la aplicación arranque contra la API real sin tocar componentes | ✅ `http.integration.test.ts` |
 
 El criterio 5 es el que responde al pedido de «preparado para continuar con el backend». Se verifica **antes** de que el backend exista, apuntando el adaptador HTTP a un servidor de prueba que responde con los esquemas del contrato.
+
+**Lo que la verificación con navegador encontró, y ninguna suite de unidad podía ver.** El criterio 3 no era un trámite: `axe-core` encontró dos defectos **sistémicos** en el sistema de diseño —`aria-sort` puesto en el `<button>` de ordenar en vez del `<th>`, y los colores de estado usados como texto en vez de sus roles de tinta—, y los dos afectaban a once de las catorce ventanas. Se arreglaron en `DataTable` y en las ventanas, y el gate **se vio fallar** con el contraste medido (2,76:1) antes de dejarlo.
+
+Los E2E de los flujos críticos encontraron tres defectos más, y los tres eran **invisibles para el typecheck, las 291 pruebas y el build**:
+
+1. **El modo simulado tenía dos almacenes.** El navegador escribía en su propio módulo y el Server Component leía del suyo: el recuento mostraba el ajuste aplicado en su insignia y el libro mayor seguía sin la fila, y el saldo no cambiaba al recargar. En modo `http` no puede pasar —hay un solo backend—, así que el modo simulado estaba mintiendo sobre una propiedad del real. Se arregló haciendo que el navegador delegue en un servidor simulado (`/api/sim`), que es el dueño del almacén.
+2. **La regla A12 no se cumplía.** `initialData` se guardaba bajo una clave que no le correspondía —el servidor lo calculaba con `pagina: 1, porPagina: 10` sin filtro ni orden— y, como `initialData` cuenta como dato fresco, el cliente nunca lo corregía: el campo mostraba el filtro de la URL y la tabla mostraba la primera página sin filtrar. Se arregló con `parametrosDeLista()` (una sola función que interpreta la URL, para el servidor y el cliente) y `refetchOnMount: 'always'`.
+3. **El ingreso con 2FA era inalcanzable.** El formulario exigía `redirect` **antes** de mirar el segundo factor, y la respuesta de un usuario con 2FA no trae `redirect` —trae el desafío, porque la sesión todavía no está abierta—. Quien tuviera dos factores veía «No se pudo ingresar» con la clave correcta.
+
 
 ---
 

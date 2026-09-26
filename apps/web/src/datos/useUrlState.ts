@@ -3,6 +3,7 @@
 import { useCallback } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { Orden } from '@control/contracts'
+import { parsearOrden } from './parametros.ts'
 
 /** Estado de la ventana que vive en la URL (regla A12): filtros, página y orden. */
 export interface EstadoUrl {
@@ -10,13 +11,6 @@ export interface EstadoUrl {
   pagina: number
   porPagina: number
   orden: Orden | null
-}
-
-function parseOrden(valor: string | null): Orden | null {
-  if (!valor) return null
-  const [campo, dir] = valor.split(':')
-  if (!campo) return null
-  return { campo, dir: dir === 'desc' ? 'desc' : 'asc' }
 }
 
 /**
@@ -34,7 +28,7 @@ export function useUrlState() {
   const texto = params.get('texto') ?? ''
   const pagina = Number(params.get('pagina') ?? '1') || 1
   const porPagina = Number(params.get('porPagina') ?? '10') || 10
-  const orden = parseOrden(params.get('orden'))
+  const orden = parsearOrden(params.get('orden'))
 
   const setEstado = useCallback(
     (next: Partial<EstadoUrl>) => {

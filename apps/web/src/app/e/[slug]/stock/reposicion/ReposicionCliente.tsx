@@ -58,7 +58,7 @@ export function ReposicionCliente({
         alinear: 'derecha',
         campoOrden: 'disponible',
         ordenable: true,
-        cuerpo: (r) => <span className="tabular-nums text-peligro">{formatearNumero.format(r.disponible)}</span>,
+        cuerpo: (r) => <span className="tabular-nums text-peligro-tinta">{formatearNumero.format(r.disponible)}</span>,
       },
       {
         id: 'minimo',

@@ -89,7 +89,7 @@ export function TransferenciaDetalleCliente({
           return merma === 0 ? (
             <span className="text-secundario">0</span>
           ) : (
-            <span className="tabular-nums text-peligro">{formatearNumero.format(merma)}</span>
+            <span className="tabular-nums text-peligro-tinta">{formatearNumero.format(merma)}</span>
           )
         },
       },
@@ -196,9 +196,9 @@ export function TransferenciaDetalleCliente({
           <p
             className={
               aviso.clase === 'ok'
-                ? 'mt-3 rounded-[var(--control-radio)] bg-exito-suave px-3 py-2 text-sm text-exito'
+                ? 'mt-3 rounded-[var(--control-radio)] bg-exito-suave px-3 py-2 text-sm text-exito-tinta'
                 : aviso.clase === 'conflicto'
-                  ? 'mt-3 rounded-[var(--control-radio)] bg-peligro-suave px-3 py-2 text-sm text-peligro'
+                  ? 'mt-3 rounded-[var(--control-radio)] bg-peligro-suave px-3 py-2 text-sm text-peligro-tinta'
                   : 'mt-3 rounded-[var(--control-radio)] bg-sutil px-3 py-2 text-sm text-secundario'
             }
           >

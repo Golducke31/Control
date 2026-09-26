@@ -49,6 +49,17 @@ coverage/
 .nyc_output/
 *.lcov
 
+# Playwright: informes, trazas y la sesión guardada.
+# `e2e/.estado/sesion.json` lleva una cookie de sesión firmada: nunca al repositorio.
+# El `**/` no es decorativo: un patrón con una barra en el medio queda anclado a la raíz
+# del `.gitignore`, así que `e2e/.estado/` no matcheaba `apps/web/e2e/.estado/` — y la
+# sesión se habría commiteado.
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+**/e2e/.estado/
+
 # Editores y sistema
 .vscode/*
 !.vscode/extensions.json

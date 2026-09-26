@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { getCliente } from '@/datos/cliente'
+import type { SearchParams } from '@/datos/parametros'
+import { parametrosDeLista } from '@/datos/parametros'
 import { CatalogoCliente } from './CatalogoCliente'
 
 export const metadata: Metadata = { title: 'Catálogo' }
@@ -16,10 +18,17 @@ export const metadata: Metadata = { title: 'Catálogo' }
  * El cliente simulado es en proceso en F3; con el backend, `getCliente()` devuelve
  * la implementación real y nada de esto cambia.
  */
-export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+export default async function Pagina({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>
+  searchParams: Promise<SearchParams>
+}) {
   const { slug } = await params
+  const sp = await searchParams
   const cliente = getCliente()
-  const inicial = await cliente.listarProductos({ empresaSlug: slug, pagina: 1, porPagina: 10 })
+  const inicial = await cliente.listarProductos({ empresaSlug: slug, ...parametrosDeLista(sp) })
 
   return (
     <Suspense>

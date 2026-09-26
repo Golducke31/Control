@@ -50,7 +50,7 @@ export function ConciliacionCliente({ slug, inicial }: { slug: string; inicial: 
         titulo: 'Diferencia',
         alinear: 'derecha',
         cuerpo: (d) => (
-          <span className="font-medium tabular-nums text-peligro">
+          <span className="font-medium tabular-nums text-peligro-tinta">
             {d.diferencia > 0 ? '+' : ''}
             {formatearNumero.format(d.diferencia)}
           </span>

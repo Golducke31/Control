@@ -41,12 +41,23 @@ export function FormularioIngreso() {
         error?: string
       }
 
-      if (!datos.ok || datos.redirect === undefined) {
+      if (!datos.ok) {
         setEstado({ tipo: 'error', mensaje: mensajeDeError(datos.error) })
         return
       }
+      /*
+        El orden importa, y estaba al revés: la comprobación de `redirect` iba antes que la
+        del segundo factor, y la respuesta de un usuario con 2FA **no trae `redirect`** —trae
+        el desafío, porque la sesión todavía no está abierta—. Así que la rama del 2FA era
+        inalcanzable y quien tuviera dos factores veía «No se pudo ingresar» con la clave
+        correcta. Primero el segundo factor, después el destino.
+      */
       if (datos.dosFactores && datos.desafio !== undefined) {
         window.location.href = `/ingresar/verificar?d=${encodeURIComponent(datos.desafio)}`
+        return
+      }
+      if (datos.redirect === undefined) {
+        setEstado({ tipo: 'error', mensaje: 'El servidor no indicó a dónde continuar.' })
         return
       }
       window.location.href = datos.redirect

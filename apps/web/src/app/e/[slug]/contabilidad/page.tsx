@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { getCliente } from '@/datos/cliente'
+import type { SearchParams } from '@/datos/parametros'
+import { parametrosDeLista } from '@/datos/parametros'
 import { ContabilidadCliente } from './ContabilidadCliente'
 import type { ResumenContable } from './ContabilidadCliente'
 
@@ -12,12 +14,19 @@ export const metadata: Metadata = { title: 'Contabilidad' }
  * El resumen de partida doble se calcula sobre **todos** los asientos, no sobre la
  * página: es la comprobación que tiene que valer para el libro entero.
  */
-export default async function Pagina({ params }: { params: Promise<{ slug: string }> }) {
+export default async function Pagina({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>
+  searchParams: Promise<SearchParams>
+}) {
   const { slug } = await params
+  const sp = await searchParams
   const cliente = getCliente()
 
   const [inicial, todos] = await Promise.all([
-    cliente.listarAsientos({ empresaSlug: slug, pagina: 1, porPagina: 10 }),
+    cliente.listarAsientos({ empresaSlug: slug, ...parametrosDeLista(sp) }),
     cliente.listarAsientos({ empresaSlug: slug, pagina: 1, porPagina: 500 }),
   ])
 

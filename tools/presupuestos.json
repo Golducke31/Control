@@ -1,0 +1,27 @@
+{
+  "_nota": [
+    "Presupuestos de peso del frontend. Los lee tools/check-presupuestos.mjs, que corre",
+    "después de `next build` y falla si una ruta los supera. Los números no viven en el",
+    "script a propósito: un presupuesto que hay que ir a buscar al código no se revisa",
+    "cuando se agrega una dependencia, y entonces el gate se convierte en un trámite que",
+    "se sube cada vez que molesta.",
+    "",
+    "La unidad es el First Load JS: lo que el navegador tiene que descargar y ejecutar",
+    "para mostrar la ruta. El tamaño del chunk propio de la ruta no dice nada útil — una",
+    "ventana puede tener poco código propio y arrastrar todo el marco.",
+    "",
+    "Calibrados contra el build del 26/09/2026: chunk compartido 103 kB, la ruta más",
+    "pesada /chofer con 145 kB. Los topes dejan el margen justo para no fallar por ruido",
+    "y no tanto como para no fallar nunca: un presupuesto que no puede fallar no es un",
+    "presupuesto."
+  ],
+  "compartido": {
+    "maxKb": 115,
+    "motivo": "El marco: React, el cliente de consultas, el canal en vivo y el sistema de diseño. Es lo que paga toda ruta, así que es el número que más importa. Medido: 103 kB."
+  },
+  "porRuta": {
+    "maxKb": 150,
+    "motivo": "Una ventana con sus tablas, sus insignias y sus formularios. Medido: la más pesada es /chofer con 145 kB; las ventanas de empresa van de 134 a 145. Por encima de 150 hay que preguntarse qué se importó de más."
+  },
+  "excepciones": {}
+}

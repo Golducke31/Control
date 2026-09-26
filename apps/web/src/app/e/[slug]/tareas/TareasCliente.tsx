@@ -53,7 +53,7 @@ function Indicador({ etiqueta, valor, alerta }: { etiqueta: string; valor: numbe
       <p
         className={
           alerta === true && valor > 0
-            ? 'mt-1 text-2xl font-semibold tabular-nums text-peligro'
+            ? 'mt-1 text-2xl font-semibold tabular-nums text-peligro-tinta'
             : 'mt-1 text-2xl font-semibold tabular-nums text-principal'
         }
       >
@@ -168,7 +168,7 @@ export function TareasCliente({
           t.ultimaCorrida?.error == null ? (
             <span className="text-xs text-terciario">—</span>
           ) : (
-            <span className="text-xs text-peligro">{t.ultimaCorrida.error}</span>
+            <span className="text-xs text-peligro-tinta">{t.ultimaCorrida.error}</span>
           ),
       },
     ],

@@ -96,7 +96,7 @@ export function ChoferCliente({
           </div>
         </div>
         {sinSenal && (
-          <p className="mt-3 rounded-[var(--control-radio)] bg-atencion-suave px-3 py-2 text-xs text-atencion">
+          <p className="mt-3 rounded-[var(--control-radio)] bg-atencion-suave px-3 py-2 text-xs text-atencion-tinta">
             Sin conexión. Lo que marques se guarda acá y se envía al volver — con el mismo id, así que el sistema no lo
             aplica dos veces.
           </p>

@@ -27,7 +27,7 @@ function Indicador({ etiqueta, valor, alerta }: { etiqueta: string; valor: numbe
       <p
         className={
           alerta === true && valor > 0
-            ? 'mt-1 text-2xl font-semibold tabular-nums text-peligro'
+            ? 'mt-1 text-2xl font-semibold tabular-nums text-peligro-tinta'
             : 'mt-1 text-2xl font-semibold tabular-nums text-principal'
         }
       >

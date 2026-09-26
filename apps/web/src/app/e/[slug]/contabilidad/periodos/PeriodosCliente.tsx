@@ -120,8 +120,8 @@ export function PeriodosCliente({
         <p
           className={
             aviso.clase === 'ok'
-              ? 'rounded-[var(--control-radio)] bg-exito-suave px-3 py-2 text-sm text-exito'
-              : 'rounded-[var(--control-radio)] bg-peligro-suave px-3 py-2 text-sm text-peligro'
+              ? 'rounded-[var(--control-radio)] bg-exito-suave px-3 py-2 text-sm text-exito-tinta'
+              : 'rounded-[var(--control-radio)] bg-peligro-suave px-3 py-2 text-sm text-peligro-tinta'
           }
         >
           {aviso.texto}
@@ -165,7 +165,7 @@ export function PeriodosCliente({
                     {formatearFecha(periodo.desde)} — {formatearFecha(periodo.hasta)} · ejercicio {periodo.ejercicio}
                   </p>
                   {periodo.asientosPendientes > 0 && (
-                    <p className="mt-1 text-xs text-peligro">
+                    <p className="mt-1 text-xs text-peligro-tinta">
                       {formatearNumero.format(periodo.asientosPendientes)} asiento(s) en borrador
                     </p>
                   )}

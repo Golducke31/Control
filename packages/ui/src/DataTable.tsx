@@ -145,24 +145,31 @@ export function DataTable<T>({
           <tr className="border-b border-borde-sutil bg-carcasa">
             {columnas.map((col) => {
               const activo = orden?.campo === col.campoOrden
+              const ordenable = col.ordenable === true && col.campoOrden !== undefined
               return (
                 <th
                   key={col.id}
                   scope="col"
+                  // `aria-sort` pertenece a la celda de encabezado, que es la que tiene el rol
+                  // `columnheader`. Puesto en el botón de adentro es un atributo no permitido y
+                  // el lector de pantalla no anuncia el orden: axe lo marca como crítico.
+                  {...(ordenable
+                    ? { 'aria-sort': activo ? (orden?.dir === 'desc' ? 'descending' : 'ascending') : 'none' }
+                    : {})}
                   className={cn(
                     'px-4 py-3 font-medium text-sobre-carcasa',
                     col.alinear === 'derecha' ? 'text-right' : 'text-left',
                   )}
                 >
-                  {col.ordenable && col.campoOrden ? (
+                  {ordenable ? (
                     <button
                       type="button"
                       onClick={() => alOrdenar?.(col.campoOrden!)}
                       className="inline-flex items-center gap-1 rounded-[var(--control-radio-sm)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
-                      aria-sort={activo ? (orden?.dir === 'desc' ? 'descending' : 'ascending') : 'none'}
                     >
                       {col.titulo}
-                      <span aria-hidden className="text-terciario">
+                      {/* Sobre la carcasa oscura el rol es el de la carcasa, no el terciario. */}
+                      <span aria-hidden className="text-sobre-carcasa-sutil">
                         {activo ? (orden?.dir === 'desc' ? '↓' : '↑') : '↕'}
                       </span>
                     </button>
@@ -195,7 +202,9 @@ export function DataTable<T>({
 
       {paginacion && alPaginar && (
         <div className="flex items-center justify-between gap-3 border-t border-borde-sutil bg-carcasa px-4 py-3 text-sm text-sobre-carcasa">
-          <span className="text-terciario">
+          {/* El pie va sobre la carcasa oscura: el rol terciario es del área clara y ahí
+              daba 2,76:1. El rol de la carcasa da 8,84:1. */}
+          <span className="text-sobre-carcasa-sutil">
             {paginacion.total} registros · página {pagina} de {paginas}
           </span>
           <div className="flex gap-2">

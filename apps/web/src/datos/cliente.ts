@@ -237,6 +237,25 @@ const almacen = {
 }
 
 /**
+ * Devuelve el almacén simulado a los fixtures.
+ *
+ * Existe por una razón concreta: el almacén dura lo que dura el proceso, y los E2E
+ * corren contra un servidor que ya está levantado. Sin esto, un recuento aplicado en
+ * una corrida deja el saldo cambiado para la siguiente, y una transferencia despachada
+ * ya no ofrece «Despachar» — los tests pasarían o fallarían según el orden en que se
+ * corrieron antes, que es la peor clase de fragilidad.
+ *
+ * No es una puerta trasera de producción: la única ruta que lo llama existe sólo fuera
+ * de producción (ver `app/api/dev/reiniciar/route.ts`).
+ */
+export function reiniciarAlmacen(): void {
+  almacen.niveles = [...niveles]
+  almacen.movimientos = [...movimientos]
+  almacen.transferencias = [...transferencias]
+  almacen.periodos = [...periodos]
+}
+
+/**
  * Aplica el efecto de una lista de movimientos sobre los saldos materializados.
  *
  * Espeja lo que hace el motor dentro de la misma transacción: el libro y el saldo se
@@ -875,11 +894,65 @@ export class HttpCliente implements ApiClient {
   }
 }
 
+/**
+ * Las operaciones del adaptador simulado, tomadas del prototipo.
+ *
+ * Se derivan y no se escriben a mano a propósito: una lista escrita a mano se olvida de
+ * un método nuevo, y el olvido se manifiesta como un 400 en runtime —«operación
+ * desconocida»— que nadie relaciona con haber agregado un método al `ApiClient`.
+ */
+export const METODOS_SIMULADOS: readonly string[] = Object.getOwnPropertyNames(
+  SimuladoCliente.prototype,
+).filter((nombre) => nombre !== 'constructor')
+
+/**
+ * Llama al servidor simulado desde el navegador.
+ *
+ * El almacén del adaptador es estado de módulo y hay dos reinos: el proceso de Node y el
+ * navegador. Si el navegador escribiera contra su propio almacén, la escritura no llegaría
+ * a ninguna lectura hecha por el servidor —el libro mayor lo renderiza un Server
+ * Component—, y el modo simulado estaría mintiendo sobre algo que en modo `http` es
+ * cierto: hay un solo almacén.
+ */
+async function pedirAlServidorSimulado<T>(operacion: string, parametros: unknown): Promise<T> {
+  const respuesta = await fetch('/api/sim', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ operacion, parametros }),
+  })
+  if (!respuesta.ok) {
+    const detalle = (await respuesta.json().catch(() => null)) as { error?: string } | null
+    throw new Error(`El servidor simulado rechazó ${operacion}: ${detalle?.error ?? respuesta.status}`)
+  }
+  return (await respuesta.json()) as T
+}
+
+/**
+ * El adaptador simulado visto desde el navegador.
+ *
+ * Es el mismo objeto, con cada método redirigido al servidor simulado. Un `Proxy` y no
+ * veintisiete métodos reescritos: así no hay forma de que uno quede sin redirigir —el que
+ * se agregue mañana también pasa por acá— y el `ApiClient` sigue siendo el mismo tipo.
+ */
+function simuladoEnElNavegador(cliente: ApiClient): ApiClient {
+  return new Proxy(cliente, {
+    get(destino, propiedad) {
+      const original = Reflect.get(destino, propiedad) as unknown
+      if (typeof original !== 'function') return original
+      return (parametros: unknown) =>
+        pedirAlServidorSimulado(String(propiedad), parametros)
+    },
+  })
+}
+
 /** Selecciona la implementación según `NEXT_PUBLIC_API_MODE` (por defecto `simulado`). */
 export function getCliente(): ApiClient {
   const modo = process.env.NEXT_PUBLIC_API_MODE ?? 'simulado'
   if (modo === 'http') {
     return new HttpCliente(process.env.NEXT_PUBLIC_API_URL ?? '/api/v1')
   }
-  return new SimuladoCliente()
+  const simulado = new SimuladoCliente()
+  // En el servidor resuelve en proceso (es el dueño del almacén); en el navegador delega,
+  // para que los dos reinos vean el mismo estado.
+  return typeof window === 'undefined' ? simulado : simuladoEnElNavegador(simulado)
 }

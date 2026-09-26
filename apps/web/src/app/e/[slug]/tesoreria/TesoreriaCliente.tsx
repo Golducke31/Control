@@ -110,7 +110,7 @@ export function TesoreriaCliente({
         campoOrden: 'monto',
         ordenable: true,
         cuerpo: (m) => (
-          <span className={m.direccion === 'credit' ? 'tabular-nums text-exito' : 'tabular-nums text-peligro'}>
+          <span className={m.direccion === 'credit' ? 'tabular-nums text-exito-tinta' : 'tabular-nums text-peligro-tinta'}>
             {m.direccion === 'credit' ? '+' : '−'}
             {pesos(m.monto).replace('$', '$ ')}
           </span>
