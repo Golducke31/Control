@@ -1,6 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, Tarjeta, Insignia, Esqueleto, EstadoVacio } from '@control/ui'
 import type { PanelResumen } from '@control/contracts'
 import { getCliente } from '@/datos/cliente'
@@ -24,6 +25,7 @@ const TONO_TENDENCIA = {
  * `initialData` para la primera pintura sin cascada.
  */
 export function PanelCliente({ slug, initialData }: { slug: string; initialData?: PanelResumen | undefined }) {
+  const t = useTranslations('panel')
   const cliente = getCliente()
   const consulta = useQuery({
     queryKey: ['panel', slug],
@@ -35,8 +37,8 @@ export function PanelCliente({ slug, initialData }: { slug: string; initialData?
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Panel"
-        descripcion="Indicadores del período. La cadena completa de documentos se opera desde Ventas y Facturación."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
       />
 
       {consulta.isLoading && !resumen ? (
@@ -48,7 +50,7 @@ export function PanelCliente({ slug, initialData }: { slug: string; initialData?
           ))}
         </div>
       ) : consulta.isError ? (
-        <EstadoVacio titulo="No se pudo cargar el panel" descripcion="Reintentá en unos segundos." />
+        <EstadoVacio titulo={t('errorTitulo')} descripcion={t('errorDescripcion')} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {resumen?.kpis.map((k) => (

@@ -1,5 +1,7 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
+
 import { Boton } from '@control/ui'
 
 /**
@@ -23,23 +25,23 @@ export default function ErrorDeVentana({
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  const t = useTranslations('errorVentana')
+
   return (
     <div className="flex flex-col gap-4 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-6">
       <div>
-        <h1 className="text-base font-medium text-principal">Esta ventana falló</h1>
-        <p className="mt-1 text-sm text-secundario">
-          El resto de la aplicación sigue funcionando: podés cambiar de ventana desde el menú o reintentar acá.
-        </p>
+        <h1 className="text-base font-medium text-principal">{t('titulo')}</h1>
+        <p className="mt-1 text-sm text-secundario">{t('descripcion')}</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <Boton variante="primario" tamano="sm" onClick={reset}>
-          Reintentar
+          {t('reintentar')}
         </Boton>
       </div>
 
       {error.digest !== undefined ? (
-        <p className="font-mono text-xs text-terciario">Referencia para el soporte: {error.digest}</p>
+        <p className="font-mono text-xs text-terciario">{t('referencia', { referencia: error.digest })}</p>
       ) : (
         <p className="font-mono text-xs text-terciario">{error.message}</p>
       )}

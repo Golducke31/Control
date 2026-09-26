@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Boton, Insignia } from '@control/ui'
 import type { Envio } from '@control/contracts'
 import {
@@ -39,6 +40,7 @@ export function ChoferCliente({
   slug: string
   envios: Envio[]
 }) {
+  const t = useTranslations('chofer')
   const [cola, setCola] = useState<EstadoCola>(COLA_VACIA)
   const [sinSenal, setSinSenal] = useState(false)
   const [ultimo, setUltimo] = useState<string | null>(null)
@@ -60,45 +62,53 @@ export function ChoferCliente({
   function sincronizarAhora() {
     const resultado = sincronizar(cola, () => !sinSenal)
     setCola(resultado.estado)
+    /*
+      El texto se resuelve acá y se guarda ya traducido. La alternativa —guardar la clave y
+      resolver en el render— obligaría a un tipo con parámetros opcionales y a una rama por
+      caso; el mensaje se muestra una vez y no cambia de idioma solo.
+    */
     setUltimo(
       resultado.aplicadas.length === 0
         ? sinSenal
-          ? 'Sin señal: no se envió nada y la cola quedó intacta, en su orden.'
-          : 'No había nada pendiente.'
-        : `Se enviaron ${resultado.aplicadas.length} operación(es)${resultado.incompleta ? ' y la cola se detuvo en la que falló.' : '.'}`,
+          ? t('sinSenal')
+          : t('nadaPendiente')
+        : resultado.incompleta
+          ? t('enviadasIncompletas', { cantidad: resultado.aplicadas.length })
+          : t('enviadas', { cantidad: resultado.aplicadas.length }),
     )
   }
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-5 px-4 py-6">
       <header className="flex flex-col gap-1">
-        <p className="text-xs uppercase tracking-wide text-terciario">Panel del conductor</p>
-        <h1 className="text-xl font-semibold text-principal">Mis entregas</h1>
+        <p className="text-xs uppercase tracking-wide text-terciario">{t('panel')}</p>
+        <h1 className="text-xl font-semibold text-principal">{t('misEntregas')}</h1>
       </header>
 
       <section className="rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm text-principal">
-              {pendientesDe(cola) === 0 ? 'Sin operaciones pendientes' : `${pendientesDe(cola)} operación(es) esperando`}
+              {pendientesDe(cola) === 0
+                ? t('sinPendientes')
+                : t('esperando', { cantidad: pendientesDe(cola) })}
             </p>
             <p className="mt-0.5 text-xs text-secundario">
-              {colaAlDia(cola) ? 'Todo lo que marcaste llegó al sistema.' : 'Se envían solas cuando vuelva la señal.'}
+              {colaAlDia(cola) ? t('todoLlego') : t('seEnvianSolas')}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Boton variante="secundario" tamano="sm" onClick={() => setSinSenal((v) => !v)}>
-              {sinSenal ? 'Simular señal' : 'Simular sin señal'}
+              {sinSenal ? t('simularSenal') : t('simularSinSenal')}
             </Boton>
             <Boton variante="primario" tamano="sm" onClick={sincronizarAhora} disabled={colaAlDia(cola)}>
-              Sincronizar
+              {t('sincronizar')}
             </Boton>
           </div>
         </div>
         {sinSenal && (
           <p className="mt-3 rounded-[var(--control-radio)] bg-atencion-suave px-3 py-2 text-xs text-atencion-tinta">
-            Sin conexión. Lo que marques se guarda acá y se envía al volver — con el mismo id, así que el sistema no lo
-            aplica dos veces.
+            {t('sinConexion')}
           </p>
         )}
         {ultimo !== null && <p className="mt-3 text-xs text-secundario">{ultimo}</p>}
@@ -120,7 +130,7 @@ export function ChoferCliente({
 
             {envio.ventanaHasta !== null && (
               <p className="mt-2 text-xs text-terciario">
-                Ventana hasta {formatearFechaHora(envio.ventanaHasta)}
+                {t('ventanaHasta', { fecha: formatearFechaHora(envio.ventanaHasta) })}
               </p>
             )}
 
@@ -131,7 +141,7 @@ export function ChoferCliente({
                 </Boton>
               ))}
               {accionesEnvio(envio).length === 0 && (
-                <span className="text-xs text-terciario">Este envío está cerrado.</span>
+                <span className="text-xs text-terciario">{t('cerrado')}</span>
               )}
             </div>
           </li>
@@ -139,8 +149,10 @@ export function ChoferCliente({
       </ul>
 
       <p className="text-xs text-terciario">
-        Empresa: <span className="font-mono">{slug}</span>. Los botones no cambian el estado en pantalla: encolan la
-        operación, que es lo que el conductor necesita cuando no hay señal.
+        {t.rich('pie', {
+          slug,
+          code: (trozos) => <span className="font-mono">{trozos}</span>,
+        })}
       </p>
     </main>
   )

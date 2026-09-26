@@ -1,3 +1,5 @@
+import { getTranslations } from 'next-intl/server'
+
 import { BarraLateral } from './BarraLateral'
 import { Icono } from './Iconos'
 import type { BloqueDeMenu } from './tipos'
@@ -10,12 +12,14 @@ import type { BloqueDeMenu } from './tipos'
  * entera en componente de cliente para administrar un booleano. El panel de la
  * empresa sigue siendo un componente de servidor.
  */
-export function MenuMovil({ bloques, slug }: { bloques: readonly BloqueDeMenu[]; slug: string }) {
+export async function MenuMovil({ bloques, slug }: { bloques: readonly BloqueDeMenu[]; slug: string }) {
+  const t = await getTranslations('menu')
+
   return (
     <details className="relative lg:hidden">
       <summary
         className="flex size-9 cursor-pointer list-none items-center justify-center rounded-[var(--control-radio-sm)] text-sobre-carcasa-sutil hover:bg-carcasa-sutil hover:text-sobre-carcasa focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
-        aria-label="Abrir el menú de ventanas"
+        aria-label={t('abrir')}
       >
         <Icono nombre="panel" tamano={20} />
       </summary>
@@ -26,7 +30,7 @@ export function MenuMovil({ bloques, slug }: { bloques: readonly BloqueDeMenu[];
           árbol de accesibilidad—, dos regiones con el mismo nombre obligan a quien
           navega por landmarks a adivinar cuál es cuál.
         */}
-        <BarraLateral bloques={bloques} slug={slug} etiqueta="Menú de ventanas" />
+        <BarraLateral bloques={bloques} slug={slug} etiqueta={t('etiqueta')} />
       </div>
     </details>
   )

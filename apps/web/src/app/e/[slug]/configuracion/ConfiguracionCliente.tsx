@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, Boton, Insignia } from '@control/ui'
 import { PALETAS_DE_INQUILINO, PLANTILLAS, plantillaPorClave, variablesDeTema } from '@control/tokens'
 import type { PaletaDeInquilino } from '@control/tokens'
@@ -27,6 +28,8 @@ import type { PaletaDeInquilino } from '@control/tokens'
  * alguien quiera compartir, es una preferencia de quien está mirando.
  */
 export function ConfiguracionCliente({ slug, paletaInicial }: { slug: string; paletaInicial: string }) {
+  const t = useTranslations('configuracion')
+  const tc = useTranslations('comun')
   const [claveDePaleta, setClaveDePaleta] = useState(paletaInicial)
   const [claveDePlantilla, setClaveDePlantilla] = useState('retail-glass')
 
@@ -39,36 +42,37 @@ export function ConfiguracionCliente({ slug, paletaInicial }: { slug: string; pa
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Configuración"
-        descripcion="La identidad de la empresa: su paleta, su plantilla y sus datos fiscales. El contraste de cada color elegido se muestra acá, medido."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <span className="text-xs text-terciario">
-              {PLANTILLAS.length} plantillas · {PALETAS_DE_INQUILINO.length} paletas
+              {t('resumen', { plantillas: PLANTILLAS.length, paletas: PALETAS_DE_INQUILINO.length })}
             </span>
             <Boton variante="secundario" tamano="sm" href={`/e/${slug}/configuracion/plantillas`}>
-              Ver plantillas
+              {t('verPlantillas')}
             </Boton>
           </>
         }
       />
 
       <section className="rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-5">
-        <h2 className="text-sm font-medium text-principal">Paleta de la empresa</h2>
+        <h2 className="text-sm font-medium text-principal">{t('paletaDeLaEmpresa')}</h2>
         <p className="mt-1 text-xs text-secundario">
-          La tinta sobre el color primario se <span className="text-principal">deriva</span>, no se fija: el sistema
-          prueba el blanco y una rampa oscura del propio primario, y elige la que más contrasta.
+          {t.rich('tintaDerivada', {
+            fuerte: (trozos) => <span className="text-principal">{trozos}</span>,
+          })}
         </p>
 
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-sm">
-            <caption className="sr-only">Contraste medido de cada paleta de inquilino</caption>
+            <caption className="sr-only">{t('contrasteMedido')}</caption>
             <thead>
               <tr className="border-b border-borde-control text-left text-xs text-terciario">
-                <th scope="col" className="py-2 pr-4 font-medium">Empresa</th>
-                <th scope="col" className="py-2 pr-4 font-medium">Primario</th>
-                <th scope="col" className="py-2 pr-4 font-medium">Tinta</th>
-                <th scope="col" className="py-2 pr-4 text-right font-medium">Contraste</th>
+                <th scope="col" className="py-2 pr-4 font-medium">{tc('empresa')}</th>
+                <th scope="col" className="py-2 pr-4 font-medium">{tc('primario')}</th>
+                <th scope="col" className="py-2 pr-4 font-medium">{tc('tinta')}</th>
+                <th scope="col" className="py-2 pr-4 text-right font-medium">{tc('contraste')}</th>
                 <th scope="col" className="py-2 font-medium">AA</th>
               </tr>
             </thead>
@@ -82,10 +86,8 @@ export function ConfiguracionCliente({ slug, paletaInicial }: { slug: string; pa
       </section>
 
       <section className="rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-5">
-        <h2 className="text-sm font-medium text-principal">Plantilla por rubro</h2>
-        <p className="mt-1 text-xs text-secundario">
-          Una plantilla elige densidad, radio y barra lateral; no elige colores —ésos son de la empresa—.
-        </p>
+        <h2 className="text-sm font-medium text-principal">{t('plantillaPorRubro')}</h2>
+        <p className="mt-1 text-xs text-secundario">{t('plantillaAyuda')}</p>
         <div className="mt-3 flex flex-wrap gap-2">
           {PLANTILLAS.map((p) => (
             <Boton
@@ -100,17 +102,23 @@ export function ConfiguracionCliente({ slug, paletaInicial }: { slug: string; pa
         </div>
         {plantilla !== undefined && (
           <dl className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-            <Dato etiqueta="Rubro" valor={plantilla.rubro} />
-            <Dato etiqueta="Densidad" valor={plantilla.densidad === 'compact' ? 'compacta' : 'cómoda'} />
-            <Dato etiqueta="Radio" valor={`${plantilla.radio} px`} />
-            <Dato etiqueta="Barra lateral" valor={plantilla.barraLateral === 'rail' ? 'riel' : 'expandida'} />
+            <Dato etiqueta={t('rubro')} valor={plantilla.rubro} />
+            <Dato
+              etiqueta={t('densidad')}
+              valor={plantilla.densidad === 'compact' ? t('densidadCompacta') : t('densidadComoda')}
+            />
+            <Dato etiqueta={t('radio')} valor={`${plantilla.radio} px`} />
+            <Dato
+              etiqueta={t('barraLateral')}
+              valor={plantilla.barraLateral === 'rail' ? t('barraRiel') : t('barraExpandida')}
+            />
           </dl>
         )}
       </section>
 
       {paleta !== undefined && plantilla !== undefined && (
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium text-principal">Vista previa</h2>
+          <h2 className="text-sm font-medium text-principal">{t('vistaPrevia')}</h2>
           {/*
             Las variables se escriben acá y todo lo de adentro las lee. Cambiar de
             plantilla o de paleta es recalcular este objeto: por eso no recarga.
@@ -124,7 +132,7 @@ export function ConfiguracionCliente({ slug, paletaInicial }: { slug: string; pa
                 className="rounded-[var(--control-radio)] px-4 py-2 text-sm font-medium"
                 style={{ background: 'var(--control-primario)', color: 'var(--control-tinta-sobre-primario)' }}
               >
-                Acción principal
+                {t('accionPrincipal')}
               </span>
               <span className="text-sm text-secundario">
                 {plantilla.nombre} · {paleta.nombre}

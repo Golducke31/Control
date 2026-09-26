@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { Orden, Paginacion, Trabajo } from '@control/contracts'
@@ -85,6 +86,8 @@ export function TareasCliente({
   initialData: { items: Trabajo[]; paginacion: Paginacion }
   ahoraMs: number
 }) {
+  const t = useTranslations('tareas')
+  const tc = useTranslations('comun')
   const { texto, pagina, porPagina, orden, setEstado, filtroActivo } = useUrlState()
   const cliente = getCliente()
   const [referencia, setReferencia] = useState(ahoraMs)
@@ -111,50 +114,50 @@ export function TareasCliente({
         titulo: 'Tarea',
         campoOrden: 'codigo',
         ordenable: true,
-        cuerpo: (t) => <span className="font-mono text-xs text-secundario">{t.codigo}</span>,
+        cuerpo: (trabajo) => <span className="font-mono text-xs text-secundario">{trabajo.codigo}</span>,
       },
-      { id: 'descripcion', titulo: 'Qué hace', campoOrden: 'descripcion', ordenable: true, cuerpo: (t) => t.descripcion },
+      { id: 'descripcion', titulo: 'Qué hace', campoOrden: 'descripcion', ordenable: true, cuerpo: (trabajo) => trabajo.descripcion },
       {
         id: 'cadencia',
         titulo: 'Cadencia',
         alinear: 'derecha',
-        cuerpo: (t) => <span className="text-secundario">{formatearCadencia(t.cadenciaMs)}</span>,
+        cuerpo: (trabajo) => <span className="text-secundario">{formatearCadencia(trabajo.cadenciaMs)}</span>,
       },
       {
         id: 'ultima',
         titulo: 'Última corrida',
         alinear: 'derecha',
-        cuerpo: (t) =>
-          t.ultimaCorrida === null ? (
-            <span className="text-xs text-terciario">nunca</span>
+        cuerpo: (trabajo) =>
+          trabajo.ultimaCorrida === null ? (
+            <span className="text-xs text-terciario">{t('nunca')}</span>
           ) : (
-            <span className="text-secundario">{formatearFechaHora(t.ultimaCorrida.iniciadaEn)}</span>
+            <span className="text-secundario">{formatearFechaHora(trabajo.ultimaCorrida.iniciadaEn)}</span>
           ),
       },
       {
         id: 'duracion',
         titulo: 'Duración',
         alinear: 'derecha',
-        cuerpo: (t) =>
-          t.ultimaCorrida === null ? (
+        cuerpo: (trabajo) =>
+          trabajo.ultimaCorrida === null ? (
             <span className="text-xs text-terciario">—</span>
           ) : (
-            <span className="tabular-nums text-secundario">{formatearDuracion(duracionDeCorrida(t.ultimaCorrida))}</span>
+            <span className="tabular-nums text-secundario">{formatearDuracion(duracionDeCorrida(trabajo.ultimaCorrida))}</span>
           ),
       },
       {
         id: 'estado',
         titulo: 'Estado',
-        cuerpo: (t) => {
-          const estado = estadoDeTrabajo(t, referencia)
+        cuerpo: (trabajo) => {
+          const estado = estadoDeTrabajo(trabajo, referencia)
           return (
             <div className="flex flex-wrap items-center gap-2">
               <Insignia tono={TONO_ESTADO[estado]} conPunto>
                 {ETIQUETA_ESTADO[estado]}
               </Insignia>
-              {t.critico && (
+              {trabajo.critico && (
                 <Insignia tono="peligro" conPunto>
-                  crítica
+                  {t('critica')}
                 </Insignia>
               )}
             </div>
@@ -164,11 +167,11 @@ export function TareasCliente({
       {
         id: 'error',
         titulo: 'Último error',
-        cuerpo: (t) =>
-          t.ultimaCorrida?.error == null ? (
+        cuerpo: (trabajo) =>
+          trabajo.ultimaCorrida?.error == null ? (
             <span className="text-xs text-terciario">—</span>
           ) : (
-            <span className="text-xs text-peligro-tinta">{t.ultimaCorrida.error}</span>
+            <span className="text-xs text-peligro-tinta">{trabajo.ultimaCorrida.error}</span>
           ),
       },
     ],
@@ -183,21 +186,21 @@ export function TareasCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Tareas programadas"
-        descripcion="Los jobs con su cadencia, su última corrida y su atraso. Un job que dejó de correr no deja error: se nota cuando falta un dato."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <input
               type="search"
               value={texto}
               onChange={(e) => setEstado({ texto: e.target.value, pagina: 1 })}
-              placeholder="Buscar por código o descripción…"
-              aria-label="Buscar tareas programadas"
+              placeholder={t('buscar')}
+              aria-label={t('buscarEtiqueta')}
               className="h-9 min-w-64 flex-1 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-3 text-sm text-principal placeholder:text-terciario focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
             />
             {filtroActivo && (
               <Boton variante="fantasma" tamano="sm" onClick={() => setEstado({ texto: '', orden: null, pagina: 1 })}>
-                Limpiar
+                {tc('limpiar')}
               </Boton>
             )}
             <Boton
@@ -205,16 +208,16 @@ export function TareasCliente({
               tamano="sm"
               onClick={() => setReferencia(Date.now())}
             >
-              Recalcular atrasos
+              {t('recalcular')}
             </Boton>
           </>
         }
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Indicador etiqueta="Tareas" valor={items.length} />
-        <Indicador etiqueta="Requieren atención" valor={enRiesgo} alerta />
-        <Indicador etiqueta="Críticas" valor={items.filter((t) => t.critico).length} />
+        <Indicador etiqueta={t('tareas')} valor={items.length} />
+        <Indicador etiqueta={t('requierenAtencion')} valor={enRiesgo} alerta />
+        <Indicador etiqueta={t('criticas')} valor={items.filter((trabajo) => trabajo.critico).length} />
       </div>
 
       <DataTable<Trabajo>
@@ -228,8 +231,8 @@ export function TareasCliente({
         paginacion={consulta.data?.paginacion ?? null}
         alPaginar={(p) => setEstado({ pagina: p })}
         filtroActivo={filtroActivo}
-        tituloVacia="No hay tareas programadas"
-        descripcionVacia="El catálogo de jobs del motor aparecerá acá con su última corrida."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
         caption="Tareas programadas ordenadas por estado y criticidad"
       />
     </div>

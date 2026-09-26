@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { Producto, Orden, Paginacion } from '@control/contracts'
@@ -36,6 +37,8 @@ export function CatalogoCliente({
   slug: string
   initialData: { items: Producto[]; paginacion: Paginacion }
 }) {
+  const t = useTranslations('catalogo')
+  const tc = useTranslations('comun')
   const { texto, pagina, porPagina, orden, setEstado, filtroActivo } = useUrlState()
   const cliente = getCliente()
 
@@ -94,16 +97,16 @@ export function CatalogoCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Catálogo"
-        descripcion="Productos de la empresa. El stock y el precio se validan contra el contrato en la frontera del cliente."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <input
               type="search"
               value={texto}
               onChange={(e) => setEstado({ texto: e.target.value, pagina: 1 })}
-              placeholder="Buscar por SKU o nombre…"
-              aria-label="Buscar productos"
+              placeholder={t('buscar')}
+              aria-label={t('buscarEtiqueta')}
               className="h-9 min-w-64 flex-1 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-3 text-sm text-principal placeholder:text-terciario focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
             />
             {filtroActivo && (
@@ -112,7 +115,7 @@ export function CatalogoCliente({
                 tamano="sm"
                 onClick={() => setEstado({ texto: '', orden: null, pagina: 1 })}
               >
-                Limpiar
+                {tc('limpiar')}
               </Boton>
             )}
           </>
@@ -130,8 +133,8 @@ export function CatalogoCliente({
         paginacion={consulta.data?.paginacion ?? null}
         alPaginar={(p) => setEstado({ pagina: p })}
         filtroActivo={filtroActivo}
-        tituloVacia="Tu catálogo está vacío"
-        descripcionVacia="Cuando cargues productos, aparecerán listados acá. Por ahora servimos datos de demostración."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
     </div>
   )

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 /**
  * Acepta la invitación: nombre y contraseña para la cuenta que se está creando.
@@ -12,6 +13,7 @@ import { useState } from 'react'
 type Estado = { tipo: 'idle' } | { tipo: 'cargando' } | { tipo: 'error'; mensaje: string }
 
 export function FormularioAceptarInvitacion({ token, correo }: { token: string; correo: string }) {
+  const t = useTranslations('invitacion')
   const [nombre, setNombre] = useState('')
   const [contrasena, setContrasena] = useState('')
   const [estado, setEstado] = useState<Estado>({ tipo: 'idle' })
@@ -19,11 +21,11 @@ export function FormularioAceptarInvitacion({ token, correo }: { token: string; 
   async function enviar(evento: React.FormEvent) {
     evento.preventDefault()
     if (nombre.trim().length < 2) {
-      setEstado({ tipo: 'error', mensaje: 'Ingresá tu nombre.' })
+      setEstado({ tipo: 'error', mensaje: t('errorNombre') })
       return
     }
     if (contrasena.length < 6) {
-      setEstado({ tipo: 'error', mensaje: 'Usá al menos 6 caracteres.' })
+      setEstado({ tipo: 'error', mensaje: t('errorCorta') })
       return
     }
     setEstado({ tipo: 'cargando' })
@@ -35,12 +37,12 @@ export function FormularioAceptarInvitacion({ token, correo }: { token: string; 
       })
       const datos = (await respuesta.json()) as { ok: boolean; redirect?: string; error?: string }
       if (!datos.ok || datos.redirect === undefined) {
-        setEstado({ tipo: 'error', mensaje: 'La invitación no es válida o expiró.' })
+        setEstado({ tipo: 'error', mensaje: t('errorInvalida') })
         return
       }
       window.location.href = datos.redirect
     } catch {
-      setEstado({ tipo: 'error', mensaje: 'No se pudo conectar con el servidor.' })
+      setEstado({ tipo: 'error', mensaje: t('errorDeRed') })
     }
   }
 
@@ -50,14 +52,22 @@ export function FormularioAceptarInvitacion({ token, correo }: { token: string; 
       className="flex w-full max-w-sm flex-col gap-4 rounded-[var(--control-radio)] border border-borde-sutil bg-tarjeta p-6 shadow-sm"
     >
       <div>
-        <h1 className="font-titulos text-xl font-semibold text-principal">Aceptar invitación</h1>
+        <h1 className="font-titulos text-xl font-semibold text-principal">{t('titulo')}</h1>
         <p className="mt-1 text-sm text-secundario">
-          Te invitaron como <strong className="text-principal">{correo}</strong>. Completá tus datos para entrar.
+          {/*
+            La frase lleva el correo en negrita en el medio, así que va entera como un mensaje
+            con marcado: cortarla en «Te invitaron como» y «. Completá tus datos para entrar»
+            dejaría dos claves que no se pueden traducir por separado a ningún idioma.
+          */}
+          {t.rich('invitadoComo', {
+            correo,
+            strong: (trozos) => <strong className="text-principal">{trozos}</strong>,
+          })}
         </p>
       </div>
 
       <label className="flex flex-col gap-1.5 text-sm font-medium text-principal">
-        Nombre
+        {t('nombre')}
         <input
           required
           value={nombre}
@@ -67,7 +77,7 @@ export function FormularioAceptarInvitacion({ token, correo }: { token: string; 
       </label>
 
       <label className="flex flex-col gap-1.5 text-sm font-medium text-principal">
-        Contraseña
+        {t('contrasena')}
         <input
           type="password"
           required
@@ -90,7 +100,7 @@ export function FormularioAceptarInvitacion({ token, correo }: { token: string; 
         disabled={estado.tipo === 'cargando'}
         className="rounded-[var(--control-radio-sm)] bg-accion px-4 py-2 font-medium text-sobre-accion hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco disabled:opacity-60"
       >
-        {estado.tipo === 'cargando' ? 'Creando cuenta…' : 'Aceptar e ingresar'}
+        {estado.tipo === 'cargando' ? t('creando') : t('aceptar')}
       </button>
     </form>
   )

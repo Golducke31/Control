@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { Orden, Paginacion, Transferencia } from '@control/contracts'
@@ -31,6 +32,8 @@ export function TransferenciasCliente({
   slug: string
   initialData: { items: Transferencia[]; paginacion: Paginacion }
 }) {
+  const t = useTranslations('transferencias')
+  const tc = useTranslations('comun')
   const { texto, pagina, porPagina, orden, setEstado, filtroActivo } = useUrlState()
   const cliente = getCliente()
 
@@ -101,7 +104,7 @@ export function TransferenciasCliente({
                 tamano="sm"
                 href={`/e/${slug}/stock/transferencias/${t.id}`}
               >
-                Abrir
+                {tc('abrir')}
               </Boton>
               <span className="text-xs text-terciario">
                 {pendientes.length === 0 ? 'sin acciones' : `${pendientes.length} disponible(s)`}
@@ -122,21 +125,21 @@ export function TransferenciasCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Transferencias"
-        descripcion="Mercadería que se mueve entre depósitos. Al despachar sale del origen; al recibir entra al destino, con lo efectivamente recibido."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <input
               type="search"
               value={texto}
               onChange={(e) => setEstado({ texto: e.target.value, pagina: 1 })}
-              placeholder="Buscar por código, depósito o estado…"
-              aria-label="Buscar transferencias"
+              placeholder={t('buscar')}
+              aria-label={t('buscarEtiqueta')}
               className="h-9 min-w-64 flex-1 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-3 text-sm text-principal placeholder:text-terciario focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
             />
             {filtroActivo && (
               <Boton variante="fantasma" tamano="sm" onClick={() => setEstado({ texto: '', orden: null, pagina: 1 })}>
-                Limpiar
+                {tc('limpiar')}
               </Boton>
             )}
           </>
@@ -154,8 +157,8 @@ export function TransferenciasCliente({
         paginacion={consulta.data?.paginacion ?? null}
         alPaginar={(p) => setEstado({ pagina: p })}
         filtroActivo={filtroActivo}
-        tituloVacia="No hay transferencias"
-        descripcionVacia="Cuando muevas mercadería entre depósitos, la transferencia aparecerá acá."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
     </div>
   )

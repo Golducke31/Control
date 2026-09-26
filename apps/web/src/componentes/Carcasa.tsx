@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { getTranslations } from 'next-intl/server'
 
 import { BarraLateral } from './BarraLateral'
 import { Icono } from './Iconos'
@@ -26,7 +27,8 @@ import { IndicadorDeConexion, ProveedorEnVivo } from './ProveedorEnVivo'
  * carcasa, el contraste del texto de navegación dependería de un color que elige
  * libremente, que es el defecto que el sistema existe para evitar.
  */
-export function Carcasa({ contexto, children }: { contexto: ContextoEmpresa; children: ReactNode }) {
+export async function Carcasa({ contexto, children }: { contexto: ContextoEmpresa; children: ReactNode }) {
+  const t = await getTranslations('carcasa')
   const empresa = contexto.empresa
   const visibles = ventanasVisibles(contexto.permisos, contexto.funcionalidades)
   const bloques: BloqueDeMenu[] = menuPorGrupo(visibles)
@@ -49,7 +51,7 @@ export function Carcasa({ contexto, children }: { contexto: ContextoEmpresa; chi
           >
             <Marca />
             <span className="hidden font-titulos text-sm font-semibold tracking-tight text-sobre-carcasa sm:block">
-              Control
+              {t('marca')}
             </span>
           </Link>
 
@@ -71,7 +73,7 @@ export function Carcasa({ contexto, children }: { contexto: ContextoEmpresa; chi
             <Link
               href={`/e/${empresa.slug}/tareas`}
               className="hidden size-9 items-center justify-center rounded-[var(--control-radio-sm)] text-sobre-carcasa-sutil hover:bg-carcasa-sutil hover:text-sobre-carcasa focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco sm:flex"
-              aria-label="Tareas programadas"
+              aria-label={t('tareasProgramadas')}
             >
               <Icono nombre="tareas" tamano={18} />
             </Link>
@@ -88,10 +90,10 @@ export function Carcasa({ contexto, children }: { contexto: ContextoEmpresa; chi
             <form action="/api/auth/salir" method="post" className="ml-1">
               <button
                 type="submit"
-                aria-label="Cerrar sesión"
+                aria-label={t('cerrarSesion')}
                 className="rounded-[var(--control-radio-sm)] px-2 py-1 text-sm text-sobre-carcasa-sutil hover:bg-carcasa-sutil hover:text-sobre-carcasa focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
               >
-                Salir
+                {t('salir')}
               </button>
             </form>
           </div>
@@ -100,7 +102,7 @@ export function Carcasa({ contexto, children }: { contexto: ContextoEmpresa; chi
         <div className="flex min-h-0 flex-1">
           <aside className="hidden w-[var(--control-ancho-carcasa)] shrink-0 border-r border-borde-sutil bg-carcasa lg:block">
             <div className="sticky top-[var(--control-alto-encabezado)]">
-              <BarraLateral bloques={bloques} slug={empresa.slug} etiqueta="Navegación principal" />
+              <BarraLateral bloques={bloques} slug={empresa.slug} etiqueta={t('navegacionPrincipal')} />
             </div>
           </aside>
 

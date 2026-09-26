@@ -43,11 +43,17 @@ export function codificarLatido(): string {
   return ': latido\n\n'
 }
 
-/** Lo que el cliente ve en el encabezado. */
-export const ETIQUETA_CONEXION: Record<EstadoConexion, string> = {
-  en_vivo: 'En vivo',
-  reconectando: 'Reconectando',
-  sin_conexion: 'Sin conexión',
+/**
+ * La **clave del mensaje** de cada estado, no la etiqueta.
+ *
+ * Acá vivía el texto —«En vivo», «Reconectando», «Sin conexión»— y es interfaz: el
+ * encabezado de la carcasa lo muestra en cada pantalla. Un módulo de datos no es el lugar
+ * de una cadena que se traduce, así que exporta la clave y el componente la resuelve.
+ */
+export const CLAVE_ESTADO_CONEXION: Record<EstadoConexion, 'enVivo' | 'reconectando' | 'sinConexion'> = {
+  en_vivo: 'enVivo',
+  reconectando: 'reconectando',
+  sin_conexion: 'sinConexion',
 }
 
 /** El tópico de un envío. Centralizado para que el emisor y el suscriptor no divergan. */

@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { Conciliacion, DiferenciaConciliacion } from '@control/contracts'
@@ -18,6 +19,7 @@ import { formatearFechaHora, formatearNumero } from '@/datos/formato'
  * que el día que el backend lo reporte de verdad la pantalla no cambia.
  */
 export function ConciliacionCliente({ slug, inicial }: { slug: string; inicial: Conciliacion }) {
+  const t = useTranslations('conciliacion')
   const [informe, setInforme] = useState(inicial)
   const [actualizando, setActualizando] = useState(false)
 
@@ -61,7 +63,7 @@ export function ConciliacionCliente({ slug, inicial }: { slug: string; inicial: 
         titulo: 'Acciones',
         cuerpo: () => (
           <Boton variante="fantasma" tamano="sm" href={`/e/${slug}/stock/recuento`}>
-            Contar
+            {t('contar')}
           </Boton>
         ),
       },
@@ -72,19 +74,21 @@ export function ConciliacionCliente({ slug, inicial }: { slug: string; inicial: 
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Conciliación"
-        descripcion="Compara el saldo materializado contra la suma del libro mayor. El job reporta sin corregir: si hay diferencia, se cuenta."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <Insignia tono={informe.cuadra ? 'exito' : 'peligro'} conPunto>
-              {informe.cuadra ? 'cuadra' : `${informe.diferencias.length} diferencia(s)`}
+              {informe.cuadra ? t('cuadra') : t('diferencias', { cantidad: informe.diferencias.length })}
             </Insignia>
             <span className="text-xs text-terciario">
-              {formatearNumero.format(informe.nivelesRevisados)} niveles · última corrida{' '}
-              {formatearFechaHora(informe.ejecutadaEn)}
+              {t('resumen', {
+                niveles: formatearNumero.format(informe.nivelesRevisados),
+                fecha: formatearFechaHora(informe.ejecutadaEn),
+              })}
             </span>
             <Boton variante="secundario" tamano="sm" onClick={() => void actualizar()} disabled={actualizando}>
-              {actualizando ? 'Actualizando…' : 'Volver a correr'}
+              {actualizando ? t('actualizando') : t('volverACorrer')}
             </Boton>
           </>
         }
@@ -95,8 +99,8 @@ export function ConciliacionCliente({ slug, inicial }: { slug: string; inicial: 
         datos={informe.diferencias}
         cargando={false}
         error={null}
-        tituloVacia="El libro explica todo el saldo"
-        descripcionVacia="No hay nada que reconciliar: cada unidad del saldo tiene su movimiento."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
     </div>
   )

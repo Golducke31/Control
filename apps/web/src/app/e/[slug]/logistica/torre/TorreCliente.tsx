@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 import { useQueryClient } from '@tanstack/react-query'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
@@ -58,6 +59,7 @@ export function TorreCliente({
   initialData: { items: Envio[]; paginacion: Paginacion }
   resumen: ResumenDeTorre
 }) {
+  const t = useTranslations('torre')
   const cliente = getCliente()
   const consultaCliente = useQueryClient()
 
@@ -109,7 +111,7 @@ export function TorreCliente({
         alinear: 'derecha',
         cuerpo: (e) =>
           e.ventanaHasta === null ? (
-            <span className="text-xs text-terciario">sin ventana</span>
+            <span className="text-xs text-terciario">{t('sinVentana')}</span>
           ) : (
             <span className="text-secundario">{formatearFechaHora(e.ventanaHasta)}</span>
           ),
@@ -131,25 +133,25 @@ export function TorreCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Torre de control"
-        descripcion="Los envíos activos, ordenados por urgencia, actualizados por el canal en vivo. Lo entregado y lo cancelado quedan afuera del tablero operativo."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <span className="text-xs text-terciario">
-              {activos.length} activos de {consulta.data?.paginacion.total ?? 0}
+              {t('resumen', { activos: activos.length, total: consulta.data?.paginacion.total ?? 0 })}
             </span>
             <Boton variante="secundario" tamano="sm" href={`/e/${slug}/logistica`}>
-              Ver todos los envíos
+              {t('verTodos')}
             </Boton>
           </>
         }
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Indicador etiqueta="Activos" valor={resumen.activos} />
-        <Indicador etiqueta="En tránsito" valor={resumen.enTransito} />
-        <Indicador etiqueta="Con incidencia" valor={resumen.incidencias} alerta />
-        <Indicador etiqueta="Entregados" valor={resumen.entregados} />
+        <Indicador etiqueta={t('activos')} valor={resumen.activos} />
+        <Indicador etiqueta={t('enTransito')} valor={resumen.enTransito} />
+        <Indicador etiqueta={t('conIncidencia')} valor={resumen.incidencias} alerta />
+        <Indicador etiqueta={t('entregados')} valor={resumen.entregados} />
       </div>
 
       <DataTable<Envio>
@@ -158,8 +160,8 @@ export function TorreCliente({
         cargando={consulta.isLoading}
         error={consulta.isError ? 'No se pudo contactar a la torre. Reintentá en unos segundos.' : null}
         alReintentar={() => consulta.refetch()}
-        tituloVacia="No hay envíos activos"
-        descripcionVacia="Todo lo despachado está entregado o cancelado."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
         caption="Envíos activos ordenados por urgencia"
       />
     </div>

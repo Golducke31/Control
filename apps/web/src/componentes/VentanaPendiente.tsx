@@ -1,3 +1,5 @@
+import { getTranslations } from 'next-intl/server'
+
 import { Insignia, Tarjeta } from '@control/ui'
 
 import { EncabezadoDeVentana } from '@control/ui'
@@ -13,7 +15,9 @@ import type { Ventana } from '@/rutas'
  *
  * Cuando llegue la fase de cada ventana, este componente se reemplaza por su contenido.
  */
-export function VentanaPendiente({ ventana }: { ventana: Ventana }) {
+export async function VentanaPendiente({ ventana }: { ventana: Ventana }) {
+  const t = await getTranslations('pendiente')
+
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
@@ -21,32 +25,36 @@ export function VentanaPendiente({ ventana }: { ventana: Ventana }) {
         descripcion={ventana.descripcion}
         acciones={
           <>
-            <Insignia tono="neutro">Fase {ventana.fase}</Insignia>
+            <Insignia tono="neutro">{t('fase', { numero: ventana.fase })}</Insignia>
             {ventana.funcionalidad !== undefined && (
-              <Insignia tono="informacion">Requiere {ventana.funcionalidad}</Insignia>
+              <Insignia tono="informacion">{t('requiere', { funcionalidad: ventana.funcionalidad })}</Insignia>
             )}
           </>
         }
       />
 
       <Tarjeta
-        titulo="Ventana declarada, contenido pendiente"
-        descripcion={`La carcasa y la navegación están listas. El contenido de esta ventana —sus datos y sus gráficos— se implementa en la fase ${ventana.fase}.`}
+        titulo={t('titulo')}
+        descripcion={t('descripcion', { fase: ventana.fase })}
       >
         <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
-          <Dato etiqueta="Ruta" valor={`/e/[empresa]/${ventana.segmento}`} mono />
-          <Dato etiqueta="Permiso" valor={ventana.permiso ?? 'basta con tener sesión'} mono={ventana.permiso !== null} />
-          <Dato etiqueta="Grupo del menú" valor={ventana.grupo} />
+          <Dato etiqueta={t('ruta')} valor={`/e/[empresa]/${ventana.segmento}`} mono />
           <Dato
-            etiqueta="Subrutas"
-            valor={ventana.subrutas.length === 0 ? 'ninguna' : String(ventana.subrutas.length)}
+            etiqueta={t('permiso')}
+            valor={ventana.permiso ?? t('bastaConSesion')}
+            mono={ventana.permiso !== null}
+          />
+          <Dato etiqueta={t('grupo')} valor={ventana.grupo} />
+          <Dato
+            etiqueta={t('subrutas')}
+            valor={ventana.subrutas.length === 0 ? t('ninguna') : String(ventana.subrutas.length)}
           />
         </dl>
 
         {ventana.subrutas.length > 0 && (
           <div className="mt-5 border-t border-borde-sutil pt-4">
             <p className="mb-2.5 text-xs font-medium tracking-wide text-terciario uppercase">
-              Subrutas declaradas
+              {t('subrutasDeclaradas')}
             </p>
             <ul className="flex flex-wrap gap-1.5">
               {ventana.subrutas.map((subruta) => (

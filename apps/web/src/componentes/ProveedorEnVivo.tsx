@@ -2,9 +2,10 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useTranslations } from 'next-intl'
 import { Canal } from '@control/contracts'
 import type { EstadoConexion } from '@control/contracts'
-import { ETIQUETA_CONEXION, TIPO_ENVIO_ACTUALIZADO } from '@/datos/eventos'
+import { CLAVE_ESTADO_CONEXION, TIPO_ENVIO_ACTUALIZADO } from '@/datos/eventos'
 
 /**
  * El proveedor de tiempo real (§5.6).
@@ -197,17 +198,17 @@ const TONO_PUNTO: Record<EstadoConexion, string> = {
  */
 export function IndicadorDeConexion() {
   const { estado } = useEnVivo()
+  const t = useTranslations('enVivo')
+  const etiqueta = t(CLAVE_ESTADO_CONEXION[estado])
 
   return (
     <span
       className="hidden items-center gap-1.5 rounded-[var(--control-radio-sm)] px-1.5 py-1 text-xs text-sobre-carcasa-sutil sm:flex"
-      title={`Estado de la conexión en vivo: ${ETIQUETA_CONEXION[estado]}`}
+      title={t('titulo', { estado: etiqueta })}
     >
       <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${TONO_PUNTO[estado]}`} />
-      <span>{ETIQUETA_CONEXION[estado]}</span>
-      <span className="sr-only">
-        Estado de la conexión en vivo: {ETIQUETA_CONEXION[estado]}. Los datos pueden no estar actualizados.
-      </span>
+      <span>{etiqueta}</span>
+      <span className="sr-only">{t('descripcion', { estado: etiqueta })}</span>
     </span>
   )
 }

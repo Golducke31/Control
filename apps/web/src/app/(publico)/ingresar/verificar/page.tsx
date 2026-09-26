@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { getTranslations } from 'next-intl/server'
 
 import { FormularioVerificacion } from './FormularioVerificacion'
 
@@ -14,14 +15,16 @@ export default async function PaginaVerificar({
   searchParams: Promise<{ d?: string }>
 }) {
   const { d: desafio } = await searchParams
+  const t = await getTranslations('verificar')
+  const tc = await getTranslations('comun')
 
   if (desafio === undefined) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-lienzo px-4 py-10">
         <div className="rounded-[var(--control-radio)] border border-borde-sutil bg-tarjeta p-6 text-center">
-          <p className="text-principal">No hay una verificación en curso.</p>
+          <p className="text-principal">{t('sinDesafio')}</p>
           <Link href="/ingresar" className="mt-2 inline-block text-acento hover:underline">
-            Volver al ingreso
+            {tc('volverAlIngreso')}
           </Link>
         </div>
       </main>

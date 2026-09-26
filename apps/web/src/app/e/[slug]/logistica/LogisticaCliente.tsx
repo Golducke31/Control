@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { Envio, Orden, Paginacion } from '@control/contracts'
@@ -60,6 +61,8 @@ export function LogisticaCliente({
   slug: string
   initialData: { items: Envio[]; paginacion: Paginacion }
 }) {
+  const t = useTranslations('logistica')
+  const tc = useTranslations('comun')
   const { texto, pagina, porPagina, orden, setEstado, filtroActivo } = useUrlState()
   const cliente = getCliente()
 
@@ -152,25 +155,25 @@ export function LogisticaCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Logística"
-        descripcion="El tablero de envíos: en preparación, en tránsito, en reparto y las incidencias. Cada envío ofrece sólo las transiciones que su estado habilita."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <input
               type="search"
               value={texto}
               onChange={(e) => setEstado({ texto: e.target.value, pagina: 1 })}
-              placeholder="Buscar por número, cliente o destino…"
-              aria-label="Buscar envíos"
+              placeholder={t('buscar')}
+              aria-label={t('buscarEtiqueta')}
               className="h-9 min-w-64 flex-1 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-3 text-sm text-principal placeholder:text-terciario focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
             />
             {filtroActivo && (
               <Boton variante="fantasma" tamano="sm" onClick={() => setEstado({ texto: '', orden: null, pagina: 1 })}>
-                Limpiar
+                {tc('limpiar')}
               </Boton>
             )}
             <Boton variante="secundario" tamano="sm" href={`/e/${slug}/logistica/torre`}>
-              Torre de control
+              {t('torre')}
             </Boton>
           </>
         }
@@ -187,8 +190,8 @@ export function LogisticaCliente({
         paginacion={consulta.data?.paginacion ?? null}
         alPaginar={(p) => setEstado({ pagina: p })}
         filtroActivo={filtroActivo}
-        tituloVacia="No hay envíos"
-        descripcionVacia="Cuando despaches mercadería a un cliente, el envío aparecerá acá con su seguimiento."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
     </div>
   )

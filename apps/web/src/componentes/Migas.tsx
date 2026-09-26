@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { getTranslations } from 'next-intl/server'
 
 /**
  * Migas de pan.
@@ -13,11 +14,13 @@ export interface TramoDeMigas {
   href?: string
 }
 
-export function Migas({ tramos }: { tramos: readonly TramoDeMigas[] }) {
+export async function Migas({ tramos }: { tramos: readonly TramoDeMigas[] }) {
   if (tramos.length === 0) return null
 
+  const t = await getTranslations('migas')
+
   return (
-    <nav aria-label="Ubicación" className="min-w-0">
+    <nav aria-label={t('ubicacion')} className="min-w-0">
       <ol className="flex flex-wrap items-center gap-1.5 text-sm text-terciario">
         {tramos.map((tramo, i) => {
           const ultimo = i === tramos.length - 1

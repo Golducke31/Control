@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 /**
  * Formulario de ingreso.
@@ -13,15 +14,41 @@ import { useState } from 'react'
 
 type Estado = { tipo: 'idle' } | { tipo: 'cargando' } | { tipo: 'error'; mensaje: string }
 
+/**
+ * Las cuentas de demostración.
+ *
+ * Guardan la **clave del mensaje**, no el texto: la nota que se muestra es interfaz, y si
+ * estuviera acá habría que traducirla en el mismo archivo del que se está sacando. El `as
+ * const` no es decorativo — hace que el tipo de `nota` sea la unión de las dos claves, así
+ * que `t(c.nota)` sigue verificado.
+ */
 const CREDENCIALES_DEMO = [
-  { correo: 'ana@control.app', nota: 'Propietaria · con 2FA' },
-  { correo: 'beto@control.app', nota: 'Encargado de depósito · pocos permisos' },
-]
+  { correo: 'ana@control.app', nota: 'demoPropietaria' },
+  { correo: 'beto@control.app', nota: 'demoDeposito' },
+] as const
 
 export function FormularioIngreso() {
+  const t = useTranslations('ingreso')
   const [correo, setCorreo] = useState('ana@control.app')
   const [contrasena, setContrasena] = useState('control123')
   const [estado, setEstado] = useState<Estado>({ tipo: 'idle' })
+
+  /**
+   * El error del servidor se traduce con una clave, no con un texto.
+   *
+   * Los mensajes de error son interfaz igual que un título: si vivieran acá, no habría
+   * forma de revisarlos junto con el resto ni de que el lint los viera.
+   */
+  function claveDeError(error?: string): 'errorCredenciales' | 'errorSinGoogle' | 'errorGenerico' {
+    switch (error) {
+      case 'credenciales':
+        return 'errorCredenciales'
+      case 'no-google':
+        return 'errorSinGoogle'
+      default:
+        return 'errorGenerico'
+    }
+  }
 
   async function enviar(evento: React.FormEvent, modo: 'credenciales' | 'google') {
     evento.preventDefault()
@@ -42,7 +69,7 @@ export function FormularioIngreso() {
       }
 
       if (!datos.ok) {
-        setEstado({ tipo: 'error', mensaje: mensajeDeError(datos.error) })
+        setEstado({ tipo: 'error', mensaje: t(claveDeError(datos.error)) })
         return
       }
       /*
@@ -57,12 +84,12 @@ export function FormularioIngreso() {
         return
       }
       if (datos.redirect === undefined) {
-        setEstado({ tipo: 'error', mensaje: 'El servidor no indicó a dónde continuar.' })
+        setEstado({ tipo: 'error', mensaje: t('errorSinDestino') })
         return
       }
       window.location.href = datos.redirect
     } catch {
-      setEstado({ tipo: 'error', mensaje: 'No se pudo conectar con el servidor.' })
+      setEstado({ tipo: 'error', mensaje: t('errorDeRed') })
     }
   }
 
@@ -72,12 +99,12 @@ export function FormularioIngreso() {
       className="flex w-full max-w-sm flex-col gap-4 rounded-[var(--control-radio)] border border-borde-sutil bg-tarjeta p-6 shadow-sm"
     >
       <div>
-        <h1 className="font-titulos text-xl font-semibold text-principal">Ingresar a Control</h1>
-        <p className="mt-1 text-sm text-secundario">Accedé con tu cuenta o con Google.</p>
+        <h1 className="font-titulos text-xl font-semibold text-principal">{t('titulo')}</h1>
+        <p className="mt-1 text-sm text-secundario">{t('subtitulo')}</p>
       </div>
 
       <label className="flex flex-col gap-1.5 text-sm font-medium text-principal">
-        Correo
+        {t('correo')}
         <input
           type="email"
           required
@@ -89,7 +116,7 @@ export function FormularioIngreso() {
       </label>
 
       <label className="flex flex-col gap-1.5 text-sm font-medium text-principal">
-        Contraseña
+        {t('contrasena')}
         <input
           type="password"
           required
@@ -111,7 +138,7 @@ export function FormularioIngreso() {
         disabled={estado.tipo === 'cargando'}
         className="rounded-[var(--control-radio-sm)] bg-accion px-4 py-2 font-medium text-sobre-accion hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco disabled:opacity-60"
       >
-        {estado.tipo === 'cargando' ? 'Ingresando…' : 'Ingresar'}
+        {estado.tipo === 'cargando' ? t('ingresando') : t('ingresar')}
       </button>
 
       <button
@@ -119,30 +146,28 @@ export function FormularioIngreso() {
         onClick={(e) => enviar(e, 'google')}
         className="rounded-[var(--control-radio-sm)] border border-borde-control px-4 py-2 font-medium text-principal hover:bg-carcasa-sutil focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
       >
-        Continuar con Google
+        {t('conGoogle')}
       </button>
 
       <div className="mt-2 rounded-[var(--control-radio-sm)] bg-carcasa-sutil px-3 py-2 text-xs text-secundario">
-        <p className="font-medium text-principal">Cuentas de demostración</p>
+        <p className="font-medium text-principal">{t('cuentasDemo')}</p>
         <ul className="mt-1 space-y-0.5">
           {CREDENCIALES_DEMO.map((c) => (
             <li key={c.correo}>
-              <code className="text-principal">{c.correo}</code> · control123 — {c.nota}
+              {/*
+                La línea mezcla texto y marcado —el correo va en `<code>`—, así que se
+                traduce entera con `t.rich`: partirla en fragmentos dejaría «· control123 —»
+                como una clave suelta, que no se puede traducir a nada.
+              */}
+              {t.rich('lineaDemo', {
+                correo: c.correo,
+                nota: t(c.nota),
+                code: (trozos) => <code className="text-principal">{trozos}</code>,
+              })}
             </li>
           ))}
         </ul>
       </div>
     </form>
   )
-}
-
-function mensajeDeError(error?: string): string {
-  switch (error) {
-    case 'credenciales':
-      return 'Correo o contraseña incorrectos.'
-    case 'no-google':
-      return 'Es correo no está habilitado para ingreso con Google.'
-    default:
-      return 'No se pudo ingresar. Intentá de nuevo.'
-  }
 }

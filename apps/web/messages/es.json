@@ -1,0 +1,449 @@
+{
+  "comun": {
+    "limpiar": "Limpiar",
+    "abrir": "Abrir",
+    "volverAlIngreso": "Volver al ingreso",
+    "volverAlLibroDiario": "Volver al libro diario",
+    "cerrarSesion": "Cerrar sesión",
+    "empresa": "Empresa",
+    "primario": "Primario",
+    "tinta": "Tinta",
+    "contraste": "Contraste"
+  },
+  "carcasa": {
+    "marca": "Control",
+    "tareasProgramadas": "Tareas programadas",
+    "cerrarSesion": "Cerrar sesión",
+    "salir": "Salir",
+    "navegacionPrincipal": "Navegación principal"
+  },
+  "menu": {
+    "abrir": "Abrir el menú de ventanas",
+    "etiqueta": "Menú de ventanas"
+  },
+  "migas": {
+    "ubicacion": "Ubicación"
+  },
+  "selectorEmpresa": {
+    "listado": "Empresas",
+    "actual": "Empresa actual: {nombre}. Cambiar de empresa"
+  },
+  "enVivo": {
+    "enVivo": "En vivo",
+    "reconectando": "Reconectando",
+    "sinConexion": "Sin conexión",
+    "titulo": "Estado de la conexión en vivo: {estado}",
+    "descripcion": "Estado de la conexión en vivo: {estado}. Los datos pueden no estar actualizados."
+  },
+  "pendiente": {
+    "fase": "Fase {numero}",
+    "requiere": "Requiere {funcionalidad}",
+    "titulo": "Ventana declarada, contenido pendiente",
+    "descripcion": "La carcasa y la navegación están listas. El contenido de esta ventana —sus datos y sus gráficos— se implementa en la fase {fase}.",
+    "ruta": "Ruta",
+    "permiso": "Permiso",
+    "grupo": "Grupo del menú",
+    "subrutas": "Subrutas",
+    "subrutasDeclaradas": "Subrutas declaradas",
+    "bastaConSesion": "basta con tener sesión",
+    "ninguna": "ninguna"
+  },
+  "noEncontrado": {
+    "titulo": "No encontramos esta página",
+    "descripcion": "La dirección puede estar mal escrita, o la empresa puede no estar disponible para tu usuario.",
+    "elegirEmpresa": "Elegir empresa"
+  },
+  "trackingNoEncontrado": {
+    "titulo": "No encontramos ese envío",
+    "descripcion": "El código del link no corresponde a ningún envío. Revisá que esté completo, o pedile a quien te lo envió que te lo mande de nuevo."
+  },
+  "impersonacion": {
+    "banda": "Modo impersonación: actuando como <strong>{objetivo}</strong> · sesión real de {por} · vence en {minutos} min.",
+    "volver": "Volver a mi sesión"
+  },
+  "errorVentana": {
+    "titulo": "Esta ventana falló",
+    "descripcion": "El resto de la aplicación sigue funcionando: podés cambiar de ventana desde el menú o reintentar acá.",
+    "reintentar": "Reintentar",
+    "referencia": "Referencia para el soporte: {referencia}"
+  },
+  "errorGlobal": {
+    "titulo": "La aplicación no pudo iniciarse",
+    "descripcion": "Es un fallo del armazón, no de una ventana. Recargá la página; si vuelve a pasar, pasale esta referencia al soporte."
+  },
+  "chofer": {
+    "panel": "Panel del conductor",
+    "misEntregas": "Mis entregas",
+    "sincronizar": "Sincronizar",
+    "simularSenal": "Simular señal",
+    "simularSinSenal": "Simular sin señal",
+    "sinConexion": "Sin conexión. Lo que marques se guarda acá y se envía al volver — con el mismo id, así que el sistema no lo aplica dos veces.",
+    "sinPendientes": "Sin operaciones pendientes",
+    "esperando": "{cantidad} operación(es) esperando",
+    "todoLlego": "Todo lo que marcaste llegó al sistema.",
+    "seEnvianSolas": "Se envían solas cuando vuelva la señal.",
+    "sinSenal": "Sin señal: no se envió nada y la cola quedó intacta, en su orden.",
+    "nadaPendiente": "No había nada pendiente.",
+    "enviadas": "Se enviaron {cantidad} operación(es).",
+    "enviadasIncompletas": "Se enviaron {cantidad} operación(es) y la cola se detuvo en la que falló.",
+    "ventanaHasta": "Ventana hasta {fecha}",
+    "cerrado": "Este envío está cerrado.",
+    "pie": "Empresa: <code>{slug}</code>. Los botones no cambian el estado en pantalla: encolan la operación, que es lo que el conductor necesita cuando no hay señal."
+  },
+  "tracking": {
+    "seguimiento": "Seguimiento de envío",
+    "destino": "Destino: {localidad}",
+    "entregadoEl": "Entregado el {fecha}.",
+    "entregaEstimada": "Entrega estimada: {desde} — {hasta}.",
+    "sinVentana": "Todavía no hay una ventana de entrega comprometida.",
+    "historial": "Historial",
+    "sinMovimientos": "Todavía no hay movimientos registrados para este envío.",
+    "aviso": "Este link es de un solo envío. Si no es tuyo, cerralo: no muestra datos de otros envíos ni del vendedor."
+  },
+  "plataforma": {
+    "consola": "Consola de plataforma",
+    "titulo": "Empresas",
+    "descripcion": "Las empresas de la plataforma. Esta consola no comparte sesión ni permisos con la carcasa de una empresa.",
+    "verDetalle": "Ver detalle",
+    "nota": "Si estás viendo esta pantalla, tu usuario pertenece a la plataforma. Un propietario de empresa que escriba esta URL es redirigido a sus propias empresas."
+  },
+  "panel": {
+    "titulo": "Panel",
+    "descripcion": "Indicadores del período. La cadena completa de documentos se opera desde Ventas y Facturación.",
+    "errorTitulo": "No se pudo cargar el panel",
+    "errorDescripcion": "Reintentá en unos segundos."
+  },
+  "stock": {
+    "titulo": "Stock",
+    "descripcion": "Niveles por depósito. El saldo y el libro mayor se escriben en la misma transacción; la conciliación verifica que sigan de acuerdo.",
+    "buscar": "Buscar por SKU, producto o depósito…",
+    "buscarEtiqueta": "Buscar niveles de stock",
+    "sinDisponible": "sin disponible",
+    "nivelesConSaldo": "Niveles con saldo",
+    "unidades": "Unidades",
+    "reservadas": "Reservadas",
+    "depositos": "Depósitos",
+    "bajoMinimo": "Bajo mínimo",
+    "tituloVacia": "No hay niveles de stock todavía",
+    "descripcionVacia": "Cuando entre mercadería, los niveles por depósito aparecerán acá."
+  },
+  "movimientos": {
+    "titulo": "Movimientos",
+    "descripcion": "El libro mayor de inventario. Es append-only: las reservas escriben su fila aunque no muevan la cantidad física.",
+    "buscar": "Buscar por SKU, producto, tipo o motivo…",
+    "buscarEtiqueta": "Buscar movimientos",
+    "tituloVacia": "El libro está vacío",
+    "descripcionVacia": "Cada entrada o salida de mercadería deja su fila acá, y no se borra nunca."
+  },
+  "depositos": {
+    "titulo": "Depósitos",
+    "descripcion": "Los lugares donde hay mercadería. Un depósito inactivo conserva su historia: no se borra, se desactiva.",
+    "buscar": "Buscar por nombre o dirección…",
+    "buscarEtiqueta": "Buscar depósitos",
+    "activo": "activo",
+    "inactivo": "inactivo",
+    "tituloVacia": "No hay depósitos",
+    "descripcionVacia": "Cargá al menos un depósito para poder recibir mercadería."
+  },
+  "recuento": {
+    "titulo": "Recuento",
+    "descripcion": "Contá lo que hay y aplicá el ajuste. Aplicar escribe el movimiento de ajuste en el libro mayor y mueve el saldo: no hay un documento de recuento, hay movimientos.",
+    "sinContar": "sin contar",
+    "aplicar": "Aplicar",
+    "deposito": "Depósito",
+    "todos": "Todos",
+    "renglones": "{cantidad} renglones para contar",
+    "tituloVacia": "No hay niveles en este depósito",
+    "descripcionVacia": "Sin saldo materializado no hay nada que contar: la primera entrada crea el nivel."
+  },
+  "reposicion": {
+    "titulo": "Reposición",
+    "descripcion": "Los niveles que quedaron por debajo de su mínimo, con la cantidad sugerida para volver al doble del mínimo.",
+    "buscar": "Buscar por SKU, producto o depósito…",
+    "buscarEtiqueta": "Buscar reposición",
+    "transferir": "Transferir",
+    "tituloVacia": "No hay nada bajo el mínimo",
+    "descripcionVacia": "Todo el stock está por encima de su punto de reposición."
+  },
+  "transferencias": {
+    "titulo": "Transferencias",
+    "descripcion": "Mercadería que se mueve entre depósitos. Al despachar sale del origen; al recibir entra al destino, con lo efectivamente recibido.",
+    "buscar": "Buscar por código, depósito o estado…",
+    "buscarEtiqueta": "Buscar transferencias",
+    "tituloVacia": "No hay transferencias",
+    "descripcionVacia": "Cuando muevas mercadería entre depósitos, la transferencia aparecerá acá."
+  },
+  "transferenciaDetalle": {
+    "sinRecibir": "sin recibir",
+    "unidades": "{cantidad} unidades",
+    "volverAlListado": "Volver al listado",
+    "acciones": "Acciones",
+    "contraLaVersion": "Se escriben contra la versión que esta pantalla leyó",
+    "desincronizada": " — y está desincronizada a propósito.",
+    "alDia": ".",
+    "cerrada": "La transferencia está cerrada: no ofrece transiciones.",
+    "sincronizar": "Sincronizar versión",
+    "versionEnPantalla": "versión en pantalla: {version}",
+    "vigente": " · vigente: {version}",
+    "alDiaVersion": " · al día",
+    "versionVigente": "(versión vigente: {version})",
+    "notas": "Notas:",
+    "tituloVacia": "La transferencia no tiene renglones",
+    "descripcionVacia": "Una transferencia sin renglones no mueve stock."
+  },
+  "conciliacion": {
+    "titulo": "Conciliación",
+    "descripcion": "Compara el saldo materializado contra la suma del libro mayor. El job reporta sin corregir: si hay diferencia, se cuenta.",
+    "contar": "Contar",
+    "cuadra": "cuadra",
+    "diferencias": "{cantidad} diferencia(s)",
+    "resumen": "{niveles} niveles · última corrida {fecha}",
+    "actualizando": "Actualizando…",
+    "volverACorrer": "Volver a correr",
+    "tituloVacia": "El libro explica todo el saldo",
+    "descripcionVacia": "No hay nada que reconciliar: cada unidad del saldo tiene su movimiento."
+  },
+  "ingreso": {
+    "titulo": "Ingresar a Control",
+    "subtitulo": "Accedé con tu cuenta o con Google.",
+    "correo": "Correo",
+    "contrasena": "Contraseña",
+    "ingresar": "Ingresar",
+    "ingresando": "Ingresando…",
+    "conGoogle": "Continuar con Google",
+    "cuentasDemo": "Cuentas de demostración",
+    "lineaDemo": "<code>{correo}</code> · control123 — {nota}",
+    "demoPropietaria": "Propietaria · con 2FA",
+    "demoDeposito": "Encargado de depósito · pocos permisos",
+    "errorCredenciales": "Correo o contraseña incorrectos.",
+    "errorSinGoogle": "Es correo no está habilitado para ingreso con Google.",
+    "errorSinDestino": "El servidor no indicó a dónde continuar.",
+    "errorDeRed": "No se pudo conectar con el servidor.",
+    "errorGenerico": "No se pudo ingresar. Intentá de nuevo."
+  },
+  "verificar": {
+    "titulo": "Verificación en dos pasos",
+    "subtitulo": "Ingresá el código de 6 dígitos de tu autenticador. En la demostración, cualquier código de 6 dígitos sirve.",
+    "codigo": "Código",
+    "verificar": "Verificar",
+    "verificando": "Verificando…",
+    "sinDesafio": "No hay una verificación en curso.",
+    "errorCodigo": "Código incorrecto.",
+    "errorDesafio": "El desafío expiró. Volvé a ingresar.",
+    "errorDeRed": "No se pudo conectar con el servidor."
+  },
+  "recuperar": {
+    "titulo": "Recuperar acceso",
+    "subtitulo": "Te enviaremos un enlace para restablecer tu contraseña.",
+    "correo": "Correo",
+    "enviar": "Enviar enlace",
+    "enviando": "Enviando…",
+    "enviado": "Si el correo existe, el enlace fue enviado.",
+    "abrirDemo": "Abrir enlace de demostración",
+    "errorEnvio": "No se pudo enviar la solicitud.",
+    "errorDeRed": "No se pudo conectar con el servidor."
+  },
+  "restablecer": {
+    "titulo": "Nueva contraseña",
+    "subtitulo": "Elegí una contraseña para tu cuenta.",
+    "contrasena": "Contraseña",
+    "restablecer": "Restablecer",
+    "guardando": "Guardando…",
+    "errorCorta": "Usá al menos 6 caracteres.",
+    "errorEnlace": "El enlace no es válido o expiró.",
+    "errorDeRed": "No se pudo conectar con el servidor."
+  },
+  "invitacion": {
+    "titulo": "Aceptar invitación",
+    "invitadoComo": "Te invitaron como <strong>{correo}</strong>. Completá tus datos para entrar.",
+    "nombre": "Nombre",
+    "contrasena": "Contraseña",
+    "aceptar": "Aceptar e ingresar",
+    "creando": "Creando cuenta…",
+    "errorNombre": "Ingresá tu nombre.",
+    "errorCorta": "Usá al menos 6 caracteres.",
+    "errorInvalida": "La invitación no es válida o expiró.",
+    "errorDeRed": "No se pudo conectar con el servidor.",
+    "expirada": "Esta invitación no es válida o expiró."
+  },
+  "empresas": {
+    "titulo": "Elegí una empresa",
+    "subtitulo": "Entrá a la cuenta que quieras gestionar.",
+    "sinEmpresas": "No tenés empresas propias. Como usuario de plataforma, podés impersonar una para operar en ella.",
+    "impersonar": "Impersonar empresa",
+    "entrarImpersonando": "Entrar en modo impersonación"
+  },
+  "ventas": {
+    "titulo": "Ventas",
+    "descripcion": "La cadena de documentos: cotización → pedido → remito → factura → devolución. Las acciones disponibles dependen del estado.",
+    "buscar": "Buscar por número, cliente o tipo…",
+    "buscarEtiqueta": "Buscar documentos",
+    "tituloVacia": "No hay documentos todavía",
+    "descripcionVacia": "Cuando operes la cadena de ventas, los documentos aparecerán listados acá."
+  },
+  "facturacion": {
+    "titulo": "Facturación",
+    "descripcion": "Comprobantes fiscales autorizados por AFIP o en borrador, con su estado de cobro.",
+    "buscar": "Buscar por número o cliente…",
+    "buscarEtiqueta": "Buscar comprobantes",
+    "tituloVacia": "No hay comprobantes todavía",
+    "descripcionVacia": "Cuando factures, los comprobantes aparecerán listados acá."
+  },
+  "compras": {
+    "titulo": "Compras",
+    "descripcion": "Órdenes a proveedores y lo que se recibe contra ellas. Lo recibido es lo que entra al stock, y una orden aprobada registra quién la aprobó.",
+    "buscar": "Buscar por número, proveedor o estado…",
+    "buscarEtiqueta": "Buscar órdenes de compra",
+    "sinAprobar": "sin aprobar",
+    "completa": "completa",
+    "pendiente": "pendiente",
+    "tituloVacia": "No hay órdenes de compra",
+    "descripcionVacia": "Cuando le compres a un proveedor, la orden aparecerá acá con su estado de aprobación y de recepción."
+  },
+  "tesoreria": {
+    "titulo": "Tesorería",
+    "descripcion": "Caja y bancos: cada cobro, pago y comisión con su cuenta. Lo que no está conciliado es la diferencia contra el extracto.",
+    "buscar": "Buscar por cuenta, tipo o detalle…",
+    "buscarEtiqueta": "Buscar movimientos de tesorería",
+    "sinConciliar": "sin conciliar",
+    "saldoEnPesos": "Saldo en pesos",
+    "cuentas": "Cuentas",
+    "sinConciliarEtiqueta": "Sin conciliar",
+    "tituloVacia": "No hay movimientos",
+    "descripcionVacia": "Cada cobro, pago o comisión deja su movimiento acá."
+  },
+  "contabilidad": {
+    "titulo": "Contabilidad",
+    "descripcion": "El libro diario: cada asiento con su origen y su período. La partida doble la garantiza el motor, y acá se ve.",
+    "buscar": "Buscar por número, descripción u origen…",
+    "buscarEtiqueta": "Buscar asientos",
+    "periodos": "Períodos",
+    "asientos": "Asientos",
+    "debitos": "Débitos",
+    "creditos": "Créditos",
+    "tituloVacia": "El libro está vacío",
+    "descripcionVacia": "Los asientos se generan solos desde las ventas, las compras y el stock."
+  },
+  "periodos": {
+    "titulo": "Períodos",
+    "descripcion": "El cierre del mes. Un período cerrado no acepta asientos; para corregirlo hay que reabrirlo, con motivo y autor, porque invalida cualquier balance ya presentado.",
+    "soloAutorizado": "Los períodos los cerrás y reabrís como <quien>{autor}</quien>.",
+    "abierto": "abierto",
+    "enCierre": "en cierre",
+    "cerrado": "cerrado",
+    "reabierto": "reabierto",
+    "rango": "{desde} — {hasta} · ejercicio {ejercicio}",
+    "pendientes": "{cantidad} asiento(s) en borrador",
+    "cerradoPor": "cerrado {fecha} por {autor}",
+    "reabiertoPor": "reabierto {fecha} por {autor}: {motivo}",
+    "motivoReapertura": "Motivo de la reapertura…",
+    "motivoParaReabrir": "Motivo para reabrir {nombre}",
+    "cerrar": "Cerrar período",
+    "noSePuedeCerrar": "No se puede cerrar",
+    "reabrir": "Reabrir"
+  },
+  "fiscal": {
+    "titulo": "Fiscal",
+    "descripcion": "La posición de IVA del período, con sus dos componentes a la vista. Una alícuota es una norma con fecha: se calcula con la vigente al período, no con la de hoy.",
+    "calculada": "calculada {fecha}",
+    "aFavor": "a favor",
+    "aPagar": "a pagar",
+    "sinMovimiento": "sin movimiento",
+    "debitoFiscal": "Débito fiscal · ventas",
+    "creditoFiscal": "Crédito fiscal · compras",
+    "saldoTecnico": "Saldo técnico del período {periodo}",
+    "ventasNetas": "Ventas netas",
+    "ivaDebito": "IVA débito",
+    "comprasNetas": "Compras netas",
+    "ivaCredito": "IVA crédito",
+    "componentesDelSaldo": "IVA débito − IVA crédito",
+    "saldoAPagar": "El saldo es a pagar: el débito fiscal supera al crédito del período.",
+    "saldoAFavor": "El saldo queda a favor y se arrastra al período siguiente.",
+    "determinacion": "Determinación por período",
+    "alicuotas": "Alícuotas",
+    "retenciones": "Retenciones",
+    "libros": "Libros"
+  },
+  "catalogo": {
+    "titulo": "Catálogo",
+    "descripcion": "Productos de la empresa. El stock y el precio se validan contra el contrato en la frontera del cliente.",
+    "buscar": "Buscar por SKU o nombre…",
+    "buscarEtiqueta": "Buscar productos",
+    "tituloVacia": "Tu catálogo está vacío",
+    "descripcionVacia": "Cuando cargues productos, aparecerán listados acá. Por ahora servimos datos de demostración."
+  },
+  "logistica": {
+    "titulo": "Logística",
+    "descripcion": "El tablero de envíos: en preparación, en tránsito, en reparto y las incidencias. Cada envío ofrece sólo las transiciones que su estado habilita.",
+    "buscar": "Buscar por número, cliente o destino…",
+    "buscarEtiqueta": "Buscar envíos",
+    "torre": "Torre de control",
+    "tituloVacia": "No hay envíos",
+    "descripcionVacia": "Cuando despaches mercadería a un cliente, el envío aparecerá acá con su seguimiento."
+  },
+  "torre": {
+    "titulo": "Torre de control",
+    "descripcion": "Los envíos activos, ordenados por urgencia, actualizados por el canal en vivo. Lo entregado y lo cancelado quedan afuera del tablero operativo.",
+    "sinVentana": "sin ventana",
+    "resumen": "{activos} activos de {total}",
+    "verTodos": "Ver todos los envíos",
+    "activos": "Activos",
+    "enTransito": "En tránsito",
+    "conIncidencia": "Con incidencia",
+    "entregados": "Entregados",
+    "tituloVacia": "No hay envíos activos",
+    "descripcionVacia": "Todo lo despachado está entregado o cancelado."
+  },
+  "equipo": {
+    "titulo": "Equipo",
+    "descripcion": "Quién trabaja en esta empresa, con qué rol y con qué permisos. El menú de cada persona sale de acá: los permisos se otorgan por usuario, no sólo por rol.",
+    "buscar": "Buscar por nombre o rol…",
+    "buscarEtiqueta": "Buscar miembros",
+    "verRoles": "Ver roles",
+    "tituloVacia": "Todavía no hay nadie en el equipo",
+    "descripcionVacia": "Invitá a la primera persona para que pueda entrar a esta empresa."
+  },
+  "auditoria": {
+    "titulo": "Auditoría",
+    "descripcion": "Todo lo que pasó, con su autor, su momento y su contexto. Es la ventana que responde «quién hizo esto», y no se puede editar: el registro es append-only.",
+    "buscar": "Buscar por autor, acción o entidad…",
+    "buscarEtiqueta": "Buscar eventos de auditoría",
+    "tituloVacia": "No hay eventos todavía",
+    "descripcionVacia": "Cada cambio que se haga en la empresa va a quedar registrado acá."
+  },
+  "tareas": {
+    "titulo": "Tareas programadas",
+    "descripcion": "Los jobs con su cadencia, su última corrida y su atraso. Un job que dejó de correr no deja error: se nota cuando falta un dato.",
+    "buscar": "Buscar por código o descripción…",
+    "buscarEtiqueta": "Buscar tareas programadas",
+    "nunca": "nunca",
+    "critica": "crítica",
+    "recalcular": "Recalcular atrasos",
+    "tareas": "Tareas",
+    "requierenAtencion": "Requieren atención",
+    "criticas": "Críticas",
+    "tituloVacia": "No hay tareas programadas",
+    "descripcionVacia": "El catálogo de jobs del motor aparecerá acá con su última corrida."
+  },
+  "configuracion": {
+    "titulo": "Configuración",
+    "descripcion": "La identidad de la empresa: su paleta, su plantilla y sus datos fiscales. El contraste de cada color elegido se muestra acá, medido.",
+    "resumen": "{plantillas} plantillas · {paletas} paletas",
+    "verPlantillas": "Ver plantillas",
+    "paletaDeLaEmpresa": "Paleta de la empresa",
+    "tintaDerivada": "La tinta sobre el color primario se <fuerte>deriva</fuerte>, no se fija: el sistema prueba el blanco y una rampa oscura del propio primario, y elige la que más contrasta.",
+    "contrasteMedido": "Contraste medido de cada paleta de inquilino",
+    "plantillaPorRubro": "Plantilla por rubro",
+    "plantillaAyuda": "Una plantilla elige densidad, radio y barra lateral; no elige colores —ésos son de la empresa—.",
+    "rubro": "Rubro",
+    "densidad": "Densidad",
+    "radio": "Radio",
+    "barraLateral": "Barra lateral",
+    "densidadCompacta": "compacta",
+    "densidadComoda": "cómoda",
+    "barraRiel": "riel",
+    "barraExpandida": "expandida",
+    "vistaPrevia": "Vista previa",
+    "accionPrincipal": "Acción principal"
+  }
+}

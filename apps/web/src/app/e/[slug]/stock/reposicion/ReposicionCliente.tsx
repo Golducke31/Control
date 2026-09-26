@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { Orden, Paginacion, Reposicion } from '@control/contracts'
@@ -22,6 +23,8 @@ export function ReposicionCliente({
   slug: string
   initialData: { items: Reposicion[]; paginacion: Paginacion }
 }) {
+  const t = useTranslations('reposicion')
+  const tc = useTranslations('comun')
   const { texto, pagina, porPagina, orden, setEstado, filtroActivo } = useUrlState()
   const cliente = getCliente()
 
@@ -85,7 +88,7 @@ export function ReposicionCliente({
         titulo: 'Acciones',
         cuerpo: () => (
           <Boton variante="fantasma" tamano="sm" href={`/e/${slug}/stock/transferencias`}>
-            Transferir
+            {t('transferir')}
           </Boton>
         ),
       },
@@ -101,21 +104,21 @@ export function ReposicionCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Reposición"
-        descripcion="Los niveles que quedaron por debajo de su mínimo, con la cantidad sugerida para volver al doble del mínimo."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <input
               type="search"
               value={texto}
               onChange={(e) => setEstado({ texto: e.target.value, pagina: 1 })}
-              placeholder="Buscar por SKU, producto o depósito…"
-              aria-label="Buscar reposición"
+              placeholder={t('buscar')}
+              aria-label={t('buscarEtiqueta')}
               className="h-9 min-w-64 flex-1 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-3 text-sm text-principal placeholder:text-terciario focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
             />
             {filtroActivo && (
               <Boton variante="fantasma" tamano="sm" onClick={() => setEstado({ texto: '', orden: null, pagina: 1 })}>
-                Limpiar
+                {tc('limpiar')}
               </Boton>
             )}
           </>
@@ -133,8 +136,8 @@ export function ReposicionCliente({
         paginacion={consulta.data?.paginacion ?? null}
         alPaginar={(p) => setEstado({ pagina: p })}
         filtroActivo={filtroActivo}
-        tituloVacia="No hay nada bajo el mínimo"
-        descripcionVacia="Todo el stock está por encima de su punto de reposición."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
     </div>
   )

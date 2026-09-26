@@ -1,13 +1,15 @@
 'use client'
 
 import { EncabezadoDeVentana, Boton, Insignia } from '@control/ui'
+import { useTranslations } from 'next-intl'
 import type { DeterminacionIva } from '@control/contracts'
 import { formatearFechaHora, pesos } from '@/datos/formato'
 
-const ETIQUETA_ESTADO: Record<DeterminacionIva['estado'], string> = {
-  a_favor: 'a favor',
-  a_pagar: 'a pagar',
-  sin_movimiento: 'sin movimiento',
+/** La **clave del mensaje** de cada estado. El texto vive en el catálogo, no acá. */
+const CLAVE_ESTADO: Record<DeterminacionIva['estado'], 'aFavor' | 'aPagar' | 'sinMovimiento'> = {
+  a_favor: 'aFavor',
+  a_pagar: 'aPagar',
+  sin_movimiento: 'sinMovimiento',
 }
 
 function Fila({ etiqueta, valor, fuerte }: { etiqueta: string; valor: string; fuerte?: boolean }) {
@@ -40,18 +42,19 @@ export function FiscalCliente({
   periodo: string
   inicial: DeterminacionIva
 }) {
+  const t = useTranslations('fiscal')
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Fiscal"
-        descripcion="La posición de IVA del período, con sus dos componentes a la vista. Una alícuota es una norma con fecha: se calcula con la vigente al período, no con la de hoy."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <Insignia tono={inicial.estado === 'a_pagar' ? 'atencion' : 'exito'} conPunto>
-              {ETIQUETA_ESTADO[inicial.estado]}
+              {t(CLAVE_ESTADO[inicial.estado])}
             </Insignia>
             <span className="text-xs text-terciario">
-              calculada {formatearFechaHora(inicial.calculadaEn)}
+              {t('calculada', { fecha: formatearFechaHora(inicial.calculadaEn) })}
             </span>
           </>
         }
@@ -59,46 +62,44 @@ export function FiscalCliente({
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section className="rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-5">
-          <h2 className="text-sm font-medium text-principal">Débito fiscal · ventas</h2>
+          <h2 className="text-sm font-medium text-principal">{t('debitoFiscal')}</h2>
           <div className="mt-3">
-            <Fila etiqueta="Ventas netas" valor={pesos(inicial.ventasNetas)} />
-            <Fila etiqueta="IVA débito" valor={pesos(inicial.ivaDebito)} />
+            <Fila etiqueta={t('ventasNetas')} valor={pesos(inicial.ventasNetas)} />
+            <Fila etiqueta={t('ivaDebito')} valor={pesos(inicial.ivaDebito)} />
           </div>
         </section>
 
         <section className="rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-5">
-          <h2 className="text-sm font-medium text-principal">Crédito fiscal · compras</h2>
+          <h2 className="text-sm font-medium text-principal">{t('creditoFiscal')}</h2>
           <div className="mt-3">
-            <Fila etiqueta="Compras netas" valor={pesos(inicial.comprasNetas)} />
-            <Fila etiqueta="IVA crédito" valor={pesos(inicial.ivaCredito)} />
+            <Fila etiqueta={t('comprasNetas')} valor={pesos(inicial.comprasNetas)} />
+            <Fila etiqueta={t('ivaCredito')} valor={pesos(inicial.ivaCredito)} />
           </div>
         </section>
       </div>
 
       <section className="rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-5">
-        <h2 className="text-sm font-medium text-principal">Saldo técnico del período {periodo}</h2>
+        <h2 className="text-sm font-medium text-principal">{t('saldoTecnico', { periodo })}</h2>
         <div className="mt-3">
-          <Fila etiqueta="IVA débito − IVA crédito" valor={pesos(inicial.saldoTecnico)} fuerte />
+          <Fila etiqueta={t('componentesDelSaldo')} valor={pesos(inicial.saldoTecnico)} fuerte />
         </div>
         <p className="mt-3 text-xs text-secundario">
-          {inicial.saldoTecnico > 0
-            ? 'El saldo es a pagar: el débito fiscal supera al crédito del período.'
-            : 'El saldo queda a favor y se arrastra al período siguiente.'}
+          {inicial.saldoTecnico > 0 ? t('saldoAPagar') : t('saldoAFavor')}
         </p>
       </section>
 
       <div className="flex flex-wrap gap-2">
         <Boton variante="secundario" tamano="sm" href={`/e/${slug}/fiscal/determinacion`}>
-          Determinación por período
+          {t('determinacion')}
         </Boton>
         <Boton variante="fantasma" tamano="sm" href={`/e/${slug}/fiscal/alicuotas`}>
-          Alícuotas
+          {t('alicuotas')}
         </Boton>
         <Boton variante="fantasma" tamano="sm" href={`/e/${slug}/fiscal/retenciones`}>
-          Retenciones
+          {t('retenciones')}
         </Boton>
         <Boton variante="fantasma" tamano="sm" href={`/e/${slug}/fiscal/libros`}>
-          Libros
+          {t('libros')}
         </Boton>
       </div>
     </div>

@@ -1,15 +1,23 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, Boton, Insignia } from '@control/ui'
 import type { Periodo } from '@control/contracts'
 import { cerrarPeriodo, fueReabierto, reabrirPeriodo } from '@control/contracts'
 import { getCliente } from '@/datos/cliente'
 import { formatearFecha, formatearFechaHora, formatearNumero } from '@/datos/formato'
 
-const ETIQUETA_ESTADO: Record<Periodo['estado'], string> = {
+/**
+ * La **clave del mensaje** de cada estado, no la etiqueta.
+ *
+ * El texto de un estado es interfaz igual que un título, y acá vivía escrito: un módulo de
+ * componente no es el lugar de una cadena que se traduce. Se exporta la clave y el
+ * componente la resuelve.
+ */
+const CLAVE_ESTADO: Record<Periodo['estado'], 'abierto' | 'enCierre' | 'cerrado'> = {
   open: 'abierto',
-  closing: 'en cierre',
+  closing: 'enCierre',
   closed: 'cerrado',
 }
 
@@ -42,6 +50,8 @@ export function PeriodosCliente({
   inicial: Periodo[]
   autor: string
 }) {
+  const t = useTranslations('periodos')
+  const tc = useTranslations('comun')
   const [periodos, setPeriodos] = useState(inicial)
   const [motivos, setMotivos] = useState<Record<string, string>>({})
   const [aviso, setAviso] = useState<Aviso | null>(null)
@@ -102,15 +112,18 @@ export function PeriodosCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Períodos"
-        descripcion="El cierre del mes. Un período cerrado no acepta asientos; para corregirlo hay que reabrirlo, con motivo y autor, porque invalida cualquier balance ya presentado."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <span className="text-xs text-terciario">
-              cerrás y reabrís como <span className="text-secundario">{autor}</span>
+              {t.rich('soloAutorizado', {
+                autor,
+                quien: (trozos) => <span className="text-secundario">{trozos}</span>,
+              })}
             </span>
             <Boton variante="secundario" tamano="sm" href={`/e/${slug}/contabilidad`}>
-              Volver al libro diario
+              {tc('volverAlLibroDiario')}
             </Boton>
           </>
         }
@@ -153,31 +166,41 @@ export function PeriodosCliente({
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-sm font-medium text-principal">{periodo.nombre}</h2>
                     <Insignia tono={TONO_ESTADO[periodo.estado]} conPunto>
-                      {ETIQUETA_ESTADO[periodo.estado]}
+                      {t(CLAVE_ESTADO[periodo.estado])}
                     </Insignia>
                     {fueReabierto(periodo) && (
                       <Insignia tono="atencion" conPunto>
-                        reabierto
+                        {t('reabierto')}
                       </Insignia>
                     )}
                   </div>
                   <p className="mt-1 text-xs text-secundario">
-                    {formatearFecha(periodo.desde)} — {formatearFecha(periodo.hasta)} · ejercicio {periodo.ejercicio}
+                    {t('rango', {
+                      desde: formatearFecha(periodo.desde),
+                      hasta: formatearFecha(periodo.hasta),
+                      ejercicio: periodo.ejercicio,
+                    })}
                   </p>
                   {periodo.asientosPendientes > 0 && (
                     <p className="mt-1 text-xs text-peligro-tinta">
-                      {formatearNumero.format(periodo.asientosPendientes)} asiento(s) en borrador
+                      {t('pendientes', { cantidad: formatearNumero.format(periodo.asientosPendientes) })}
                     </p>
                   )}
                   {periodo.cerradoEn !== null && (
                     <p className="mt-1 text-xs text-terciario">
-                      cerrado {formatearFechaHora(periodo.cerradoEn)} por {periodo.cerradoPor}
+                      {t('cerradoPor', {
+                        fecha: formatearFechaHora(periodo.cerradoEn),
+                        autor: periodo.cerradoPor ?? '',
+                      })}
                     </p>
                   )}
                   {fueReabierto(periodo) && (
                     <p className="mt-1 text-xs text-terciario">
-                      reabierto {formatearFechaHora(periodo.reabiertoEn ?? '')} por {periodo.reabiertoPor}:{' '}
-                      {periodo.motivoReapertura}
+                      {t('reabiertoPor', {
+                        fecha: formatearFechaHora(periodo.reabiertoEn ?? ''),
+                        autor: periodo.reabiertoPor ?? '',
+                        motivo: periodo.motivoReapertura ?? '',
+                      })}
                     </p>
                   )}
                 </div>
@@ -190,7 +213,7 @@ export function PeriodosCliente({
                       disabled={!puedeCerrar || enviando === periodo.id}
                       onClick={() => void cerrar(periodo)}
                     >
-                      {puedeCerrar ? 'Cerrar período' : 'No se puede cerrar'}
+                      {puedeCerrar ? t('cerrar') : t('noSePuedeCerrar')}
                     </Boton>
                   ) : (
                     <>
@@ -198,8 +221,8 @@ export function PeriodosCliente({
                         type="text"
                         value={motivo}
                         onChange={(e) => setMotivos((previos) => ({ ...previos, [periodo.id]: e.target.value }))}
-                        placeholder="Motivo de la reapertura…"
-                        aria-label={`Motivo para reabrir ${periodo.nombre}`}
+                        placeholder={t('motivoReapertura')}
+                        aria-label={t('motivoParaReabrir', { nombre: periodo.nombre })}
                         className="h-9 w-64 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-3 text-sm text-principal placeholder:text-terciario focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
                       />
                       <Boton
@@ -208,7 +231,7 @@ export function PeriodosCliente({
                         disabled={!puedeReabrir || enviando === periodo.id}
                         onClick={() => void reabrir(periodo)}
                       >
-                        Reabrir
+                        {t('reabrir')}
                       </Boton>
                     </>
                   )}

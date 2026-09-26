@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { getTranslations } from 'next-intl/server'
 
 import { EMPRESAS } from '@/empresa'
 import { empresasDelUsuario, esPlataforma, sesionActual } from '@/sesion'
@@ -16,14 +17,16 @@ export default async function PaginaEmpresas() {
   const sesion = await sesionActual()
   if (sesion === null) redirect('/ingresar')
 
+  const t = await getTranslations('empresas')
+  const tc = await getTranslations('comun')
   const empresas = empresasDelUsuario(sesion.sub)
   const plataforma = esPlataforma(sesion.sub)
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-lienzo px-4 py-10">
       <div className="w-full max-w-md rounded-[var(--control-radio)] border border-borde-sutil bg-tarjeta p-6 shadow-sm">
-        <h1 className="font-titulos text-xl font-semibold text-principal">Elegí una empresa</h1>
-        <p className="mt-1 text-sm text-secundario">Entrá a la cuenta que quieras gestionar.</p>
+        <h1 className="font-titulos text-xl font-semibold text-principal">{t('titulo')}</h1>
+        <p className="mt-1 text-sm text-secundario">{t('subtitulo')}</p>
 
         {empresas.length > 0 ? (
           <ul className="mt-4 flex flex-col gap-2">
@@ -48,15 +51,13 @@ export default async function PaginaEmpresas() {
             ))}
           </ul>
         ) : (
-          <p className="mt-4 text-sm text-secundario">
-            No tenés empresas propias. Como usuario de plataforma, podés impersonar una para operar en ella.
-          </p>
+          <p className="mt-4 text-sm text-secundario">{t('sinEmpresas')}</p>
         )}
 
         {plataforma && (
           <form action="/api/auth/impersonar" method="post" className="mt-6 border-t border-borde-sutil pt-4">
             <label className="flex flex-col gap-1.5 text-sm font-medium text-principal">
-              Impersonar empresa
+              {t('impersonar')}
               <select
                 name="slug"
                 defaultValue={EMPRESAS[0]?.slug}
@@ -73,7 +74,7 @@ export default async function PaginaEmpresas() {
               type="submit"
               className="mt-3 w-full rounded-[var(--control-radio-sm)] bg-peligro-solido px-4 py-2 font-medium text-sobre-peligro hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
             >
-              Entrar en modo impersonación
+              {t('entrarImpersonando')}
             </button>
           </form>
         )}
@@ -83,7 +84,7 @@ export default async function PaginaEmpresas() {
             type="submit"
             className="text-sm text-secundario underline hover:text-principal"
           >
-            Cerrar sesión
+            {tc('cerrarSesion')}
           </button>
         </form>
       </div>

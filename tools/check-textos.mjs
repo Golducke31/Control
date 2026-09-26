@@ -6,14 +6,35 @@
  * QUÉ HACE
  *
  * Recorre los componentes (`apps/web/src/**\/*.tsx`) con el parser de TypeScript
- * —el mismo que usa el compilador, no una expresión regular— y busca dos cosas:
+ * —el mismo que usa el compilador, no una expresión regular— y busca tres cosas:
  *
  *   1. **Texto entre etiquetas** (`<p>No hay envíos</p>`).
  *   2. **Literales en atributos visibles** (`placeholder`, `title`, `aria-label`,
- *      `alt`).
+ *      `alt`, `label`).
+ *   3. **Literales en props que son ranuras de texto** (`titulo`, `descripcion`,
+ *      `etiqueta`, `tituloVacia`, `descripcionVacia`).
  *
- * Los dos son interfaz escrita en el componente: no se pueden traducir, no se
+ * Los tres son interfaz escrita en el componente: no se pueden traducir, no se
  * pueden revisar en un solo lugar, y no hay forma de saber si falta una.
+ *
+ * POR QUÉ LA TERCERA REGLA LLEGÓ DESPUÉS
+ *
+ * Las dos primeras dejaban fuera el **encabezado de cada ventana**: `titulo="Stock"`
+ * y su descripción viajan como props, y una migración que las ignore cumple la letra
+ * del gate y falla su propósito —el texto más visible de la pantalla seguiría adentro
+ * del componente—. Se agregaron cuando la migración llegó a cero con las dos primeras,
+ * y el conteo subió a 121: ese número era la medida de lo que el gate no miraba.
+ *
+ * LO QUE NO DETECTA (y conviene saberlo)
+ *
+ * · Un literal dentro de una expresión de llaves —`{cond ? 'texto' : null}`— no se
+ *   marca: distinguirlo de un identificador técnico necesita tipos, no sintaxis.
+ * · Un `titulo:` dentro de un objeto —el encabezado de una columna de tabla— tampoco:
+ *   la misma razón. La línea base cubre esos casos por archivo, y el número no puede
+ *   crecer.
+ * · Los módulos `.ts` no se recorren: el lint es sobre **componentes**. Un archivo de
+ *   datos con etiquetas (`ETIQUETA_*`) queda afuera, y por eso los que se migraron se
+ *   cambiaron por registros de **claves**, no de textos.
  *
  * POR QUÉ CON EL PARSER Y NO CON REGEX
  *
@@ -59,6 +80,21 @@ const LINEA_BASE = 'tools/textos-pendientes.json';
 
 /** Atributos cuyo valor es texto que ve una persona. */
 const ATRIBUTOS_VISIBLES = new Set(['placeholder', 'title', 'aria-label', 'alt', 'label']);
+
+/**
+ * Props que son **ranuras de texto**: su valor se muestra tal cual.
+ *
+ * `titulo` y `descripcion` son el encabezado de una ventana; `etiqueta` es la etiqueta de
+ * un dato o de un landmark; `*Vacia` es lo que dice una tabla sin filas. Todos son
+ * interfaz, y todos viajaban fuera del alcance del lint.
+ */
+const RANURAS_DE_TEXTO = new Set([
+  'titulo',
+  'descripcion',
+  'etiqueta',
+  'tituloVacia',
+  'descripcionVacia',
+]);
 
 /** Recorre un directorio y devuelve los `.tsx`. */
 function componentes(dir) {
@@ -107,10 +143,11 @@ function textosDe(archivo) {
       encontrados.push({ linea: lineaDe(sf, nodo), texto: nodo.getText(sf).trim().slice(0, 60) });
     }
 
-    // 2 · Literales en atributos visibles.
+    // 2 · Literales en atributos visibles y en props que son ranuras de texto.
     if (ts.isJsxAttribute(nodo) && nodo.name !== undefined) {
       const nombre = nodo.name.getText(sf);
-      if (ATRIBUTOS_VISIBLES.has(nombre) && nodo.initializer !== undefined) {
+      const esVisible = ATRIBUTOS_VISIBLES.has(nombre) || RANURAS_DE_TEXTO.has(nombre);
+      if (esVisible && nodo.initializer !== undefined) {
         const valor = nodo.initializer;
         if (ts.isStringLiteral(valor) && esProsa(valor.text)) {
           encontrados.push({ linea: lineaDe(sf, nodo), texto: valor.text.slice(0, 60) });

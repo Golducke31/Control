@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { getTranslations } from 'next-intl/server'
 
 export const metadata: Metadata = {
   title: 'Envío no encontrado',
@@ -17,14 +18,13 @@ export const metadata: Metadata = {
  * entró: un token de tracking es la única credencial del link, y no tiene por qué quedar
  * escrito en una pantalla que alguien puede fotografiar o compartir.
  */
-export default function NoEncontrado() {
+export default async function NoEncontrado() {
+  const t = await getTranslations('trackingNoEncontrado')
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center justify-center gap-3 px-4 py-10 text-center">
-      <h1 className="text-lg font-semibold text-principal">No encontramos ese envío</h1>
-      <p className="text-sm text-secundario">
-        El código del link no corresponde a ningún envío. Revisá que esté completo, o pedile a quien te lo envió que
-        te lo mande de nuevo.
-      </p>
+      <h1 className="text-lg font-semibold text-principal">{t('titulo')}</h1>
+      <p className="text-sm text-secundario">{t('descripcion')}</p>
     </main>
   )
 }

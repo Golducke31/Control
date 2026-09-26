@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 /**
  * Segundo factor.
@@ -13,6 +14,8 @@ import { useState } from 'react'
 type Estado = { tipo: 'idle' } | { tipo: 'cargando' } | { tipo: 'error'; mensaje: string }
 
 export function FormularioVerificacion({ desafio }: { desafio: string }) {
+  const t = useTranslations('verificar')
+  const tc = useTranslations('comun')
   const [codigo, setCodigo] = useState('')
   const [estado, setEstado] = useState<Estado>({ tipo: 'idle' })
 
@@ -27,12 +30,12 @@ export function FormularioVerificacion({ desafio }: { desafio: string }) {
       })
       const datos = (await respuesta.json()) as { ok: boolean; redirect?: string; error?: string }
       if (!datos.ok || datos.redirect === undefined) {
-        setEstado({ tipo: 'error', mensaje: datos.error === 'codigo' ? 'Código incorrecto.' : 'El desafío expiró. Volvé a ingresar.' })
+        setEstado({ tipo: 'error', mensaje: datos.error === 'codigo' ? t('errorCodigo') : t('errorDesafio') })
         return
       }
       window.location.href = datos.redirect
     } catch {
-      setEstado({ tipo: 'error', mensaje: 'No se pudo conectar con el servidor.' })
+      setEstado({ tipo: 'error', mensaje: t('errorDeRed') })
     }
   }
 
@@ -54,14 +57,12 @@ export function FormularioVerificacion({ desafio }: { desafio: string }) {
     >
       <input type="hidden" name="d" value={desafio} />
       <div>
-        <h1 className="font-titulos text-xl font-semibold text-principal">Verificación en dos pasos</h1>
-        <p className="mt-1 text-sm text-secundario">
-          Ingresá el código de 6 dígitos de tu autenticador. En la demostración, cualquier código de 6 dígitos sirve.
-        </p>
+        <h1 className="font-titulos text-xl font-semibold text-principal">{t('titulo')}</h1>
+        <p className="mt-1 text-sm text-secundario">{t('subtitulo')}</p>
       </div>
 
       <label className="flex flex-col gap-1.5 text-sm font-medium text-principal">
-        Código
+        {t('codigo')}
         <input
           inputMode="numeric"
           pattern="\d{6}"
@@ -85,11 +86,11 @@ export function FormularioVerificacion({ desafio }: { desafio: string }) {
         disabled={estado.tipo === 'cargando'}
         className="rounded-[var(--control-radio-sm)] bg-accion px-4 py-2 font-medium text-sobre-accion hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco disabled:opacity-60"
       >
-        {estado.tipo === 'cargando' ? 'Verificando…' : 'Verificar'}
+        {estado.tipo === 'cargando' ? t('verificando') : t('verificar')}
       </button>
 
       <a href="/ingresar" className="text-center text-sm text-acento hover:underline">
-        Volver al ingreso
+        {tc('volverAlIngreso')}
       </a>
     </form>
   )

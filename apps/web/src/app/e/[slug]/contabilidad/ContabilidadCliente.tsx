@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { Asiento, Orden, Paginacion } from '@control/contracts'
@@ -60,6 +61,8 @@ export function ContabilidadCliente({
   initialData: { items: Asiento[]; paginacion: Paginacion }
   resumen: ResumenContable
 }) {
+  const t = useTranslations('contabilidad')
+  const tc = useTranslations('comun')
   const { texto, pagina, porPagina, orden, setEstado, filtroActivo } = useUrlState()
   const cliente = getCliente()
 
@@ -136,35 +139,35 @@ export function ContabilidadCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Contabilidad"
-        descripcion="El libro diario: cada asiento con su origen y su período. La partida doble la garantiza el motor, y acá se ve."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <input
               type="search"
               value={texto}
               onChange={(e) => setEstado({ texto: e.target.value, pagina: 1 })}
-              placeholder="Buscar por número, descripción u origen…"
-              aria-label="Buscar asientos"
+              placeholder={t('buscar')}
+              aria-label={t('buscarEtiqueta')}
               className="h-9 min-w-64 flex-1 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-3 text-sm text-principal placeholder:text-terciario focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
             />
             {filtroActivo && (
               <Boton variante="fantasma" tamano="sm" onClick={() => setEstado({ texto: '', orden: null, pagina: 1 })}>
-                Limpiar
+                {tc('limpiar')}
               </Boton>
             )}
             <Boton variante="secundario" tamano="sm" href={`/e/${slug}/contabilidad/periodos`}>
-              Períodos
+              {t('periodos')}
             </Boton>
           </>
         }
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Indicador etiqueta="Asientos" valor={String(resumen.asientos)} />
-        <Indicador etiqueta="Débitos" valor={pesos(resumen.debito)} />
+        <Indicador etiqueta={t('asientos')} valor={String(resumen.asientos)} />
+        <Indicador etiqueta={t('debitos')} valor={pesos(resumen.debito)} />
         <Indicador
-          etiqueta="Créditos"
+          etiqueta={t('creditos')}
           valor={pesos(resumen.credito)}
           nota={resumen.partidaDoble ? 'la partida doble cierra' : 'la partida doble NO cierra'}
         />
@@ -181,8 +184,8 @@ export function ContabilidadCliente({
         paginacion={consulta.data?.paginacion ?? null}
         alPaginar={(p) => setEstado({ pagina: p })}
         filtroActivo={filtroActivo}
-        tituloVacia="El libro está vacío"
-        descripcionVacia="Los asientos se generan solos desde las ventas, las compras y el stock."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
     </div>
   )

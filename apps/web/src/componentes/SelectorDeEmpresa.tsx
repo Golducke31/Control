@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { cn } from '@control/ui'
 
@@ -26,6 +27,7 @@ export function SelectorDeEmpresa({
   actual: Empresa
 }) {
   const ruta = usePathname()
+  const t = useTranslations('selectorEmpresa')
 
   // Se reemplaza el slug en la ruta actual y se conserva el resto.
   const rutaEn = (slug: string): string => {
@@ -40,7 +42,7 @@ export function SelectorDeEmpresa({
           'flex cursor-pointer list-none items-center gap-2.5 rounded-[var(--control-radio-sm)] px-2 py-1.5',
           'hover:bg-carcasa-sutil focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco',
         )}
-        aria-label={`Empresa actual: ${actual.nombre}. Cambiar de empresa`}
+        aria-label={t('actual', { nombre: actual.nombre })}
       >
         <span
           aria-hidden="true"
@@ -56,7 +58,7 @@ export function SelectorDeEmpresa({
 
       <div className="absolute top-full left-0 z-40 mt-2 w-72 overflow-hidden rounded-[var(--control-radio)] border border-borde-sutil bg-carcasa shadow-lg">
         <p className="border-b border-borde-sutil px-3 py-2 text-xs font-medium tracking-wide text-sobre-carcasa-sutil uppercase">
-          Empresas
+          {t('listado')}
         </p>
         <ul>
           {empresas.map((empresa) => {

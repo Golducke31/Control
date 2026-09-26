@@ -1,3 +1,5 @@
+import { getTranslations } from 'next-intl/server'
+
 /**
  * Banda de impersonación.
  *
@@ -8,7 +10,8 @@
  * está operando.
  */
 
-export function BandaImpersonacion({ objetivo, por, exp }: { objetivo: string; por: string; exp: number }) {
+export async function BandaImpersonacion({ objetivo, por, exp }: { objetivo: string; por: string; exp: number }) {
+  const t = await getTranslations('impersonacion')
   const segundosRestantes = Math.max(0, exp - Math.floor(Date.now() / 1000))
   const minutos = Math.floor(segundosRestantes / 60)
 
@@ -19,7 +22,12 @@ export function BandaImpersonacion({ objetivo, por, exp }: { objetivo: string; p
     >
       <span aria-hidden="true">⚠</span>
       <span>
-        Modo impersonación: actuando como <strong>{objetivo}</strong> · sesión real de {por} · vence en {minutos} min.
+        {t.rich('banda', {
+          objetivo,
+          por,
+          minutos,
+          strong: (trozos) => <strong>{trozos}</strong>,
+        })}
       </span>
       <form action="/api/auth/impersonar" method="post" className="ml-2">
         <input type="hidden" name="detener" value="1" />
@@ -27,7 +35,7 @@ export function BandaImpersonacion({ objetivo, por, exp }: { objetivo: string; p
           type="submit"
           className="rounded-[var(--control-radio-sm)] bg-sobre-peligro px-2 py-0.5 text-xs font-semibold text-peligro-solido hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
         >
-          Volver a mi sesión
+          {t('volver')}
         </button>
       </form>
     </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { NivelStock, Orden, Paginacion } from '@control/contracts'
@@ -45,6 +46,8 @@ export function StockCliente({
   initialData: { items: NivelStock[]; paginacion: Paginacion }
   resumen: ResumenDeStock
 }) {
+  const t = useTranslations('stock')
+  const tc = useTranslations('comun')
   const { texto, pagina, porPagina, orden, setEstado, filtroActivo } = useUrlState()
   const cliente = getCliente()
 
@@ -102,7 +105,7 @@ export function StockCliente({
         cuerpo: (n) =>
           n.disponible === 0 ? (
             <Insignia tono="peligro" conPunto>
-              sin disponible
+              {t('sinDisponible')}
             </Insignia>
           ) : (
             <span className="font-medium tabular-nums">{formatearNumero.format(n.disponible)}</span>
@@ -120,21 +123,21 @@ export function StockCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Stock"
-        descripcion="Niveles por depósito. El saldo y el libro mayor se escriben en la misma transacción; la conciliación verifica que sigan de acuerdo."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <input
               type="search"
               value={texto}
               onChange={(e) => setEstado({ texto: e.target.value, pagina: 1 })}
-              placeholder="Buscar por SKU, producto o depósito…"
-              aria-label="Buscar niveles de stock"
+              placeholder={t('buscar')}
+              aria-label={t('buscarEtiqueta')}
               className="h-9 min-w-64 flex-1 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-3 text-sm text-principal placeholder:text-terciario focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
             />
             {filtroActivo && (
               <Boton variante="fantasma" tamano="sm" onClick={() => setEstado({ texto: '', orden: null, pagina: 1 })}>
-                Limpiar
+                {tc('limpiar')}
               </Boton>
             )}
           </>
@@ -142,12 +145,12 @@ export function StockCliente({
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <Indicador etiqueta="Niveles con saldo" valor={formatearNumero.format(resumen.niveles)} />
-        <Indicador etiqueta="Unidades" valor={formatearNumero.format(resumen.unidades)} />
-        <Indicador etiqueta="Reservadas" valor={formatearNumero.format(resumen.reservadas)} />
-        <Indicador etiqueta="Depósitos" valor={formatearNumero.format(resumen.depositos)} />
+        <Indicador etiqueta={t('nivelesConSaldo')} valor={formatearNumero.format(resumen.niveles)} />
+        <Indicador etiqueta={t('unidades')} valor={formatearNumero.format(resumen.unidades)} />
+        <Indicador etiqueta={t('reservadas')} valor={formatearNumero.format(resumen.reservadas)} />
+        <Indicador etiqueta={t('depositos')} valor={formatearNumero.format(resumen.depositos)} />
         <Indicador
-          etiqueta="Bajo mínimo"
+          etiqueta={t('bajoMinimo')}
           valor={formatearNumero.format(resumen.bajoMinimo)}
           nota={resumen.bajoMinimo > 0 ? 'ver Reposición' : 'todo por encima del mínimo'}
         />
@@ -164,8 +167,8 @@ export function StockCliente({
         paginacion={consulta.data?.paginacion ?? null}
         alPaginar={(p) => setEstado({ pagina: p })}
         filtroActivo={filtroActivo}
-        tituloVacia="No hay niveles de stock todavía"
-        descripcionVacia="Cuando entre mercadería, los niveles por depósito aparecerán acá."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
     </div>
   )

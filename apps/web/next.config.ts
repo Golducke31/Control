@@ -1,4 +1,14 @@
 import type { NextConfig } from 'next'
+import createNextIntlPlugin from 'next-intl/plugin'
+
+/**
+ * El plugin conecta `src/i18n/request.ts` con el compilador.
+ *
+ * Hace falta porque los Server Components piden los mensajes **sin recibir un pedido HTTP**
+ * —no hay `req` del que sacarlos—, así que next-intl necesita un punto de entrada que
+ * declare de dónde salen. Es la única pieza del sistema de mensajes que no es un import.
+ */
+const conMensajes = createNextIntlPlugin('./src/i18n/request.ts')
 
 const config: NextConfig = {
   reactStrictMode: true,
@@ -21,4 +31,4 @@ const config: NextConfig = {
   },
 }
 
-export default config
+export default conMensajes(config)

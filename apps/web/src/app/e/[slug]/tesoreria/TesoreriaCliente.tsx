@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { MovimientoTesoreria, Orden, Paginacion } from '@control/contracts'
@@ -60,6 +61,8 @@ export function TesoreriaCliente({
   initialData: { items: MovimientoTesoreria[]; paginacion: Paginacion }
   resumen: ResumenDeTesoreria
 }) {
+  const t = useTranslations('tesoreria')
+  const tc = useTranslations('comun')
   const { texto, pagina, porPagina, orden, setEstado, filtroActivo } = useUrlState()
   const cliente = getCliente()
 
@@ -124,7 +127,7 @@ export function TesoreriaCliente({
             <span className="text-xs text-terciario">sí</span>
           ) : (
             <Insignia tono="atencion" conPunto>
-              sin conciliar
+              {t('sinConciliar')}
             </Insignia>
           ),
       },
@@ -140,21 +143,21 @@ export function TesoreriaCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Tesorería"
-        descripcion="Caja y bancos: cada cobro, pago y comisión con su cuenta. Lo que no está conciliado es la diferencia contra el extracto."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <input
               type="search"
               value={texto}
               onChange={(e) => setEstado({ texto: e.target.value, pagina: 1 })}
-              placeholder="Buscar por cuenta, tipo o detalle…"
-              aria-label="Buscar movimientos de tesorería"
+              placeholder={t('buscar')}
+              aria-label={t('buscarEtiqueta')}
               className="h-9 min-w-64 flex-1 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-3 text-sm text-principal placeholder:text-terciario focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
             />
             {filtroActivo && (
               <Boton variante="fantasma" tamano="sm" onClick={() => setEstado({ texto: '', orden: null, pagina: 1 })}>
-                Limpiar
+                {tc('limpiar')}
               </Boton>
             )}
           </>
@@ -162,10 +165,10 @@ export function TesoreriaCliente({
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Indicador etiqueta="Saldo en pesos" valor={pesos(resumen.saldoArs)} />
-        <Indicador etiqueta="Cuentas" valor={String(resumen.cuentas)} />
+        <Indicador etiqueta={t('saldoEnPesos')} valor={pesos(resumen.saldoArs)} />
+        <Indicador etiqueta={t('cuentas')} valor={String(resumen.cuentas)} />
         <Indicador
-          etiqueta="Sin conciliar"
+          etiqueta={t('sinConciliarEtiqueta')}
           valor={String(resumen.sinConciliar)}
           nota={resumen.sinConciliar > 0 ? 'pendiente de conciliación bancaria' : 'todo conciliado'}
         />
@@ -182,8 +185,8 @@ export function TesoreriaCliente({
         paginacion={consulta.data?.paginacion ?? null}
         alPaginar={(p) => setEstado({ pagina: p })}
         filtroActivo={filtroActivo}
-        tituloVacia="No hay movimientos"
-        descripcionVacia="Cada cobro, pago o comisión deja su movimiento acá."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
     </div>
   )

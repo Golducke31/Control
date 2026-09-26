@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
@@ -37,6 +38,7 @@ export function RecuentoCliente({
   niveles: NivelStock[]
   depositos: Deposito[]
 }) {
+  const t = useTranslations('recuento')
   const router = useRouter()
   const searchParams = useSearchParams()
   const depositoElegido = searchParams.get('deposito') ?? 'todos'
@@ -160,7 +162,7 @@ export function RecuentoCliente({
             )
           }
           const previa = previsualizar(n)
-          if (previa === null) return <span className="text-xs text-terciario">sin contar</span>
+          if (previa === null) return <span className="text-xs text-terciario">{t('sinContar')}</span>
           if (!previa.ok) return <span className="text-xs text-peligro-tinta">{previa.motivo}</span>
           return (
             <span className={previa.delta === 0 ? 'text-xs text-terciario' : 'text-xs text-secundario'}>
@@ -183,7 +185,7 @@ export function RecuentoCliente({
               disabled={!listo || enviando === clave(n)}
               onClick={() => void aplicar(n)}
             >
-              Aplicar
+              {t('aplicar')}
             </Boton>
           )
         },
@@ -195,18 +197,18 @@ export function RecuentoCliente({
   return (
     <div className="flex flex-col gap-6">
       <EncabezadoDeVentana
-        titulo="Recuento"
-        descripcion="Contá lo que hay y aplicá el ajuste. Aplicar escribe el movimiento de ajuste en el libro mayor y mueve el saldo: no hay un documento de recuento, hay movimientos."
+        titulo={t('titulo')}
+        descripcion={t('descripcion')}
         barra={
           <>
             <label className="flex items-center gap-2 text-sm text-secundario">
-              Depósito
+              {t('deposito')}
               <select
                 value={depositoElegido}
                 onChange={(e) => elegirDeposito(e.target.value)}
                 className="h-9 rounded-[var(--control-radio)] border border-borde-control bg-tarjeta px-2 text-sm text-principal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foco"
               >
-                <option value="todos">Todos</option>
+                <option value="todos">{t('todos')}</option>
                 {depositos.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.nombre}
@@ -215,7 +217,7 @@ export function RecuentoCliente({
               </select>
             </label>
             <span className="text-xs text-terciario">
-              {formatearNumero.format(lineas.length)} renglones para contar
+              {t('renglones', { cantidad: formatearNumero.format(lineas.length) })}
             </span>
           </>
         }
@@ -230,8 +232,8 @@ export function RecuentoCliente({
         datos={lineas}
         cargando={false}
         error={null}
-        tituloVacia="No hay niveles en este depósito"
-        descripcionVacia="Sin saldo materializado no hay nada que contar: la primera entrada crea el nivel."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
     </div>
   )

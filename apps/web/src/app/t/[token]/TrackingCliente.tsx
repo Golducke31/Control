@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { Insignia } from '@control/ui'
 import type { TrackingPublico } from '@control/contracts'
 import { ETIQUETA_ESTADO_ENVIO, TONO_ESTADO_ENVIO } from '@/app/e/[slug]/logistica/LogisticaCliente'
@@ -18,39 +19,45 @@ import { formatearFecha, formatearFechaHora } from '@/datos/formato'
  * ni importes: el link de seguimiento lo abre el cliente final y puede reenviarlo.
  */
 export function TrackingCliente({ seguimiento }: { seguimiento: TrackingPublico }) {
+  const t = useTranslations('tracking')
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-6 px-4 py-10">
       <header className="flex flex-col gap-2">
-        <p className="text-xs uppercase tracking-wide text-terciario">Seguimiento de envío</p>
+        <p className="text-xs uppercase tracking-wide text-terciario">{t('seguimiento')}</p>
         <h1 className="font-mono text-2xl font-semibold text-principal">{seguimiento.numero}</h1>
         <div className="flex flex-wrap items-center gap-2">
           <Insignia tono={TONO_ESTADO_ENVIO[seguimiento.estado]} conPunto>
             {ETIQUETA_ESTADO_ENVIO[seguimiento.estado]}
           </Insignia>
-          <span className="text-sm text-secundario">Destino: {seguimiento.localidadDestino}</span>
+          <span className="text-sm text-secundario">
+            {t('destino', { localidad: seguimiento.localidadDestino })}
+          </span>
         </div>
       </header>
 
       <section className="rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-5">
         {seguimiento.entregadoEn !== null ? (
           <p className="text-sm text-principal">
-            Entregado el {formatearFechaHora(seguimiento.entregadoEn)}.
+            {t('entregadoEl', { fecha: formatearFechaHora(seguimiento.entregadoEn) })}
           </p>
         ) : seguimiento.ventanaHasta !== null ? (
           <p className="text-sm text-principal">
-            Entrega estimada: {formatearFechaHora(seguimiento.ventanaDesde ?? seguimiento.ventanaHasta)} —{' '}
-            {formatearFechaHora(seguimiento.ventanaHasta)}.
+            {t('entregaEstimada', {
+              desde: formatearFechaHora(seguimiento.ventanaDesde ?? seguimiento.ventanaHasta),
+              hasta: formatearFechaHora(seguimiento.ventanaHasta),
+            })}
           </p>
         ) : (
-          <p className="text-sm text-secundario">Todavía no hay una ventana de entrega comprometida.</p>
+          <p className="text-sm text-secundario">{t('sinVentana')}</p>
         )}
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-principal">Historial</h2>
+        <h2 className="text-sm font-medium text-principal">{t('historial')}</h2>
         {seguimiento.eventos.length === 0 ? (
           <p className="rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-4 text-sm text-secundario">
-            Todavía no hay movimientos registrados para este envío.
+            {t('sinMovimientos')}
           </p>
         ) : (
           <ol className="flex flex-col gap-3">
@@ -69,9 +76,7 @@ export function TrackingCliente({ seguimiento }: { seguimiento: TrackingPublico 
         )}
       </section>
 
-      <p className="text-xs text-terciario">
-        Este link es de un solo envío. Si no es tuyo, cerralo: no muestra datos de otros envíos ni del vendedor.
-      </p>
+      <p className="text-xs text-terciario">{t('aviso')}</p>
     </main>
   )
 }

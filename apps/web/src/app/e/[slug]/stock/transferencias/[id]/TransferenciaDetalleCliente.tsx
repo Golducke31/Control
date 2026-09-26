@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { EncabezadoDeVentana, DataTable, Boton, Insignia } from '@control/ui'
 import type { Columna } from '@control/ui'
 import type { AccionTransferencia, ItemTransferencia, Transferencia } from '@control/contracts'
@@ -47,6 +48,7 @@ export function TransferenciaDetalleCliente({
   slug: string
   inicial: Transferencia
 }) {
+  const t = useTranslations('transferenciaDetalle')
   const [transferencia, setTransferencia] = useState(inicial)
   const [versionEnPantalla, setVersionEnPantalla] = useState(inicial.actualizadaEn)
   const [aviso, setAviso] = useState<Aviso | null>(null)
@@ -74,7 +76,7 @@ export function TransferenciaDetalleCliente({
         alinear: 'derecha',
         cuerpo: (i) =>
           i.cantidadRecibida === null ? (
-            <span className="text-xs text-terciario">sin recibir</span>
+            <span className="text-xs text-terciario">{t('sinRecibir')}</span>
           ) : (
             formatearNumero.format(i.cantidadRecibida)
           ),
@@ -140,10 +142,10 @@ export function TransferenciaDetalleCliente({
               {ETIQUETA_ESTADO_TRANSFERENCIA[transferencia.estado]}
             </Insignia>
             <span className="text-xs text-terciario">
-              {formatearNumero.format(unidadesDeTransferencia(transferencia.items))} unidades
+              {t('unidades', { cantidad: formatearNumero.format(unidadesDeTransferencia(transferencia.items)) })}
             </span>
             <Boton variante="secundario" tamano="sm" href={`/e/${slug}/stock/transferencias`}>
-              Volver al listado
+              {t('volverAlListado')}
             </Boton>
           </>
         }
@@ -152,10 +154,10 @@ export function TransferenciaDetalleCliente({
       <section className="rounded-[var(--control-radio)] border border-borde-control bg-tarjeta p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-medium text-principal">Acciones</h2>
+            <h2 className="text-sm font-medium text-principal">{t('acciones')}</h2>
             <p className="mt-0.5 text-xs text-secundario">
-              Se escriben contra la versión que esta pantalla leyó
-              {desincronizada ? ' — y está desincronizada a propósito.' : '.'}
+              {t('contraLaVersion')}
+              {desincronizada ? t('desincronizada') : t('alDia')}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -171,7 +173,7 @@ export function TransferenciaDetalleCliente({
               </Boton>
             ))}
             {accionesTransferencia(transferencia.estado).length === 0 && (
-              <span className="text-xs text-terciario">La transferencia está cerrada: no ofrece transiciones.</span>
+              <span className="text-xs text-terciario">{t('cerrada')}</span>
             )}
             <Boton
               variante="fantasma"
@@ -182,14 +184,16 @@ export function TransferenciaDetalleCliente({
               }}
               disabled={!desincronizada}
             >
-              Sincronizar versión
+              {t('sincronizar')}
             </Boton>
           </div>
         </div>
 
         <p className="mt-3 font-mono text-[11px] text-terciario">
-          versión en pantalla: {versionEnPantalla}
-          {desincronizada ? ` · vigente: ${transferencia.actualizadaEn}` : ' · al día'}
+          {t('versionEnPantalla', { version: versionEnPantalla })}
+          {desincronizada
+            ? t('vigente', { version: transferencia.actualizadaEn })
+            : t('alDiaVersion')}
         </p>
 
         {aviso !== null && (
@@ -204,7 +208,9 @@ export function TransferenciaDetalleCliente({
           >
             {aviso.texto}
             {aviso.clase === 'conflicto' && (
-              <span className="ml-1 font-mono text-[11px]">(versión vigente: {aviso.versionActual})</span>
+              <span className="ml-1 font-mono text-[11px]">
+                {t('versionVigente', { version: aviso.versionActual })}
+              </span>
             )}
           </p>
         )}
@@ -215,13 +221,13 @@ export function TransferenciaDetalleCliente({
         datos={transferencia.items}
         cargando={false}
         error={null}
-        tituloVacia="La transferencia no tiene renglones"
-        descripcionVacia="Una transferencia sin renglones no mueve stock."
+        tituloVacia={t('tituloVacia')}
+        descripcionVacia={t('descripcionVacia')}
       />
 
       {transferencia.notas !== undefined && (
         <p className="text-sm text-secundario">
-          <span className="text-terciario">Notas: </span>
+          <span className="text-terciario">{t('notas')} </span>
           {transferencia.notas}
         </p>
       )}

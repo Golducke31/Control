@@ -1,3 +1,5 @@
+import { getTranslations } from 'next-intl/server'
+
 import { empresaPorSlug } from '@/empresa'
 import { invitacionPorToken } from '@/sesion'
 import { FormularioAceptarInvitacion } from './FormularioAceptarInvitacion'
@@ -15,6 +17,7 @@ export default async function PaginaInvitacion({
   params: Promise<{ token: string }>
 }) {
   const { token } = await params
+  const t = await getTranslations('invitacion')
   const invitacion = invitacionPorToken(token)
   const empresa = invitacion ? empresaPorSlug(invitacion.empresaSlug) : undefined
 
@@ -22,7 +25,7 @@ export default async function PaginaInvitacion({
     return (
       <main className="flex min-h-screen items-center justify-center bg-lienzo px-4 py-10">
         <div className="rounded-[var(--control-radio)] border border-borde-sutil bg-tarjeta p-6 text-center">
-          <p className="text-principal">Esta invitación no es válida o expiró.</p>
+          <p className="text-principal">{t('expirada')}</p>
         </div>
       </main>
     )

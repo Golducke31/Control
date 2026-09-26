@@ -21,6 +21,7 @@
     "@control/ui": "*",
     "@tanstack/react-query": "^5.103.1",
     "next": "^15.5.0",
+    "next-intl": "^4.14.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

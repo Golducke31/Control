@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter, Space_Grotesk } from 'next/font/google'
+import { NextIntlClientProvider } from 'next-intl'
+import { getLocale, getMessages } from 'next-intl/server'
 import type { ReactNode } from 'react'
 
 // El orden importa: los tokens primero, y después los estilos de la aplicación, que
@@ -38,12 +40,24 @@ export const metadata: Metadata = {
     'Plataforma de gestión comercial, stock, logística y facturación electrónica para empresas que operan en serio.',
 }
 
-export default function LayoutRaiz({ children }: { children: ReactNode }) {
+export default async function LayoutRaiz({ children }: { children: ReactNode }) {
+  const idioma = await getLocale()
+  const mensajes = await getMessages()
+
   return (
     // El tema por defecto es el claro, con la carcasa violeta. El oscuro es una
     // variante: alcanza con `data-tema="oscuro"`, y no hay un segundo sistema.
-    <html lang="es-AR" data-tema="claro" className={`${titulos.variable} ${cuerpo.variable}`}>
-      <body>{children}</body>
+    <html lang={idioma} data-tema="claro" className={`${titulos.variable} ${cuerpo.variable}`}>
+      <body>
+        {/*
+          Los mensajes bajan al cliente una sola vez, acá. Los componentes cliente los piden
+          con `useTranslations`, y los de servidor con `getTranslations` — que no pasa por
+          este proveedor. Sin él, un componente cliente mostraría las claves.
+        */}
+        <NextIntlClientProvider locale={idioma} messages={mensajes}>
+          {children}
+        </NextIntlClientProvider>
+      </body>
     </html>
   )
 }
